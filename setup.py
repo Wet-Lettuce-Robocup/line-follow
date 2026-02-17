@@ -3,7 +3,7 @@ import os
 
 from setuptools import find_packages, setup
 
-package_name = 'line-follow'
+package_name = 'line_follow'
 
 setup(
     name=package_name,
