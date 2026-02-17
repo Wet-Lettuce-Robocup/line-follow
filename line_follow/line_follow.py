@@ -1,6 +1,8 @@
 from geometry_msgs.msg import Twist
 from rclpy.lifecycle import LifecycleNode, LifecycleState
 from rclpy.lifecycle import TransitionCallbackReturn
+from rclpy.publisher import Publisher
+from rclpy.subscription import Subscription
 from sensor_msgs.msg import Image
 
 
@@ -8,8 +10,8 @@ class LineFollowerNode(LifecycleNode):
 
     def __init__(self) -> None:
         super().__init__('line_follower')
-        self.vel_pub = None
-        self.image_sub = None
+        self.vel_pub: Publisher | None = None
+        self.image_sub: Subscription | None = None
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
