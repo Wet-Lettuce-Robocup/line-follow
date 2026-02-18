@@ -5,7 +5,6 @@ from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
 from sensor_msgs.msg import Image
 
-
 class LineFollowerNode(LifecycleNode):
 
     def __init__(self) -> None:
