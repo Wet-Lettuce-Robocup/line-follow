@@ -182,7 +182,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   if (m.m00 == 0) {return 0.0;}
 
     // Centroid X coordinate formula: X = M10 / M00
-  double lineCenterX = m.m10 / m.m00;
+  double lineCenterX = (m.m10 / m.m00) + x;
 
     // 6. Calculate the error from the screen center
   double screenCenterX = thresh.cols / 2.0;
