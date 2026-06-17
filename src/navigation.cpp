@@ -146,7 +146,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // 2. Threshold the image to isolate the line (adjust threshold value as needed)
     // Using THRESH_BINARY_INV assuming a dark line on a light background.
     // Use cv::THRESH_BINARY if it's a bright line on a dark background.
-  cv::threshold(gray, thresh, 80, 255, cv::THRESH_BINARY_INV);
+  cv::threshold(gray, thresh, 70, 255, cv::THRESH_BINARY_INV);
   // cv::adaptiveThreshold(gray, thresh, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C, cv::THRESH_BINARY_INV,
   //   101, 2);
 
