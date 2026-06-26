@@ -88,7 +88,7 @@ if(BUILD_TESTING)
   # the following line skips cpplint (only works in a git repo)
   # comment the line when this package is in a git repo and when
   # a copyright and license is added to all source files
-  # set(ament_cmake_cpplint_FOUND TRUE)
+  set(ament_cmake_cpplint_FOUND TRUE)
   file(GLOB_RECURSE EXCLUDED_EXTERN_FILES
     RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     "extern/*"
@@ -96,6 +96,10 @@ if(BUILD_TESTING)
 
   # 2. Feed the explicit file list directly into the global linter exclusion variable
   list(APPEND AMENT_LINT_AUTO_FILE_EXCLUDE ${EXCLUDED_EXTERN_FILES})
+
+  set(ament_cmake_uncrustify_ARGS EXCLUDE "extern")
+  set(ament_cmake_copyright_ARGS EXCLUDE "extern")
+
   ament_lint_auto_find_test_dependencies()
 endif()
 
