@@ -10,6 +10,7 @@ struct Node
   int id;
   cv::Point pos; // averaged position after merging
   bool is_endpoint;
+  bool screen_edge;
 };
 
 struct Edge
@@ -25,10 +26,46 @@ struct Edge
   }
 };
 
-struct Graph
-{
+class Graph {
+public:
   std::vector<Node> nodes;
   std::vector<Edge> edges;
+
+  int nextID = 0;
+
+  Node * nodeFromID(int id);
+  std::vector<Edge *> getConnectedEdges(int nodeID);
+};
+
+struct LocalEdge : Edge {};
+
+struct TrackedNode : Node
+{
+  TrackedNode(cv::Point pos);
+  int age = 0;
+  int missedFrames = 0;
+  cv::KalmanFilter kf = cv::KalmanFilter(4, 2, 0);
+};
+
+struct TrackedEdge : Edge
+{
+  uint32_t age = 0;
+  double angleFromSrc;
+  double angleFromDst;
+};
+
+class TrackedGraph {
+public:
+  std::vector<TrackedNode> nodes;
+  std::vector<TrackedEdge> edges;
+
+  int nextID = 0;
+  int edgePenalty = 0; // TODO Change later once edge detection exists
+
+  TrackedNode * nodeFromID(int id);
+  std::vector<TrackedEdge *> getConnectedEdges(int nodeID);
+
+  std::vector<std::vector<double>> getCostMatrix(Graph & graph);
 };
 
 enum NavigationType
@@ -49,25 +86,28 @@ public:
   CallbackReturn on_cleanup(const rclcpp_lifecycle::State &) override;
   CallbackReturn on_shutdown(const rclcpp_lifecycle::State &) override;
 
-  int pathLimit;
-  int minEdgeSize;
+  uint32_t pathLimit;
+  uint32_t minEdgeSize;
+  uint32_t gatingThreshold;
   NavigationType navigationType;
 
 private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr imageSub;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float64>> errorPub;
 
+  cv::Point cvtPoint(cv::Mat & src, cv::Mat & dst, cv::Point point);
+
   void simpleNavigation(cv::Mat & frame);
   void advancedNavigation(cv::Mat & frame);
 
   void imageCallback(sensor_msgs::msg::Image::SharedPtr msg);
-  cv::Mat processImage(cv::Mat & image);
   double simpleError(const cv::Mat & frame);
-
   void publishError(double error);
 
-  std::vector<Node> findPath(Node startPos);
+  cv::Mat processImage(cv::Mat & image);
+  cv::Mat applyThreshold(cv::Mat & image);
 
+  std::vector<cv::Point> extractGreen(cv::Mat & image);
   void extractNodes();
   void extractEdges();
 
@@ -77,15 +117,34 @@ private:
 
   void removeShortEdges(std::vector<Edge> & edges);
   Edge mergeEdges(Edge edge1, Edge edge2);
+  void removeUnconnectedNodes();
 
   void findNextNode(std::vector<Node> & path);
   double calculateAngle(cv::Point point1, cv::Point point2);
 
-  Node * nodeFromID(int id);
-  std::vector<Edge *> getConnectedEdges(int nodeID);
+  void updateGraph();
+
   std::vector<double> getEdgeDirections(Node origin, std::vector<Edge *> edges);
 
+  void edgeToTracked(const Edge & edge, TrackedEdge & trackedEdge);
+
+  void findStartingEdge(int & trackingID, TrackedEdge **currentEdge);
+  void findNextTarget(int & trackingID, TrackedEdge **currentEdge);
+  TrackedEdge * closestToAngle(
+    int currentNode,
+    std::vector<TrackedEdge *> currentEdges,
+    double targetAngle);
+
+  cv::Mat rawImage;
+  cv::Mat skeletonizedImage;
+
   Graph graph;
+  TrackedGraph trackedGraph;
+  std::vector<cv::Point> green;
+
+  int currentTarget = -1;
+  TrackedEdge *currentEdge = nullptr;
+  bool searchingLineBreak;
 
   cv::VideoWriter writer;
 };

@@ -1,9 +1,21 @@
 cmake_minimum_required(VERSION 3.20)
 project(line_follow)
 
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 20)
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
+
+add_library(hungarian-algorithm-cpp STATIC
+  extern/hungarian-algorithm-cpp/Hungarian.cpp
+  extern/hungarian-algorithm-cpp/Hungarian.h
+)
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
@@ -33,6 +45,7 @@ add_executable(navigation src/navigation.cpp)
 target_include_directories(navigation PRIVATE
   include
   ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/extern/hungarian-algorithm-cpp
 )
 
 target_link_libraries(navigation PRIVATE
@@ -42,6 +55,7 @@ target_link_libraries(navigation PRIVATE
   ${std_msgs_TARGETS}
   cv_bridge::cv_bridge
   ${OpenCV_LIBRARIES}
+  hungarian-algorithm-cpp
 )
 
 add_executable(pid_loop src/pid_loop.cpp)
