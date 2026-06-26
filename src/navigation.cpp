@@ -65,9 +65,9 @@ NavigationNode::NavigationNode()
     frameSize);
 
   if (!this->writer.isOpened()) {
-    std::cerr << "CRITICAL ERROR: VideoWriter failed to initiate!" << std::endl;
-    std::cerr << "Check 1: Does OpenCV have FFMPEG? Build Info: " << cv::getBuildInformation() <<
-      std::endl;
+    RCLCPP_ERROR(this->get_logger(), "CRITICAL ERROR: VideoWriter failed to initiate!");
+    RCLCPP_ERROR(this->get_logger(), "Check 1: Does OpenCV have FFMPEG? Build Info: %s",
+      cv::getBuildInformation().c_str());
   }
 }
 
@@ -541,7 +541,7 @@ void NavigationNode::removeShortEdges(std::vector<Edge> & edges)
     Node *dst = this->graph.nodeFromID(edges[i].dst);
 
     if (!src || !dst) {
-      std::cerr << "Node does not exist!\n";
+      RCLCPP_ERROR(this->get_logger(), "Node does not exist!");
       continue;
     }
 
@@ -555,7 +555,7 @@ void NavigationNode::removeShortEdges(std::vector<Edge> & edges)
     // Merge close intersections
     for (Edge *connectedEdge : this->graph.getConnectedEdges(edges[i].src)) {
       if (!connectedEdge) {
-        std::cerr << "Edge does not exist!\n";
+        RCLCPP_ERROR(this->get_logger(), "Edge does not exist!");
         continue;
       }
 
@@ -882,8 +882,8 @@ void NavigationNode::updateGraph()
                        });
 
       if (connectedIt == this->graph.nodes.end()) {
-        std::cerr
-            << "Couldn't find the other node??? (This should never happen)\n";
+        RCLCPP_ERROR(this->get_logger(),
+          "Couldn't find the other node??? (This should never happen)");
         return;
       }
 
@@ -1050,7 +1050,7 @@ void NavigationNode::findNextTarget(
 
 
   if (surroundingEdges.size() == 0) {
-    std::cerr << "No surrounding edges to node (This should never happen)\n";
+    RCLCPP_ERROR(this->get_logger(), "No surrounding edges to node (This should never happen)");
     return;
   }
 
