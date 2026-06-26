@@ -98,7 +98,14 @@ if(BUILD_TESTING)
   list(APPEND AMENT_LINT_AUTO_FILE_EXCLUDE ${EXCLUDED_EXTERN_FILES})
 
   set(ament_cmake_uncrustify_ARGS EXCLUDE "extern")
-  set(ament_cmake_copyright_ARGS EXCLUDE "extern")
+
+  set(ament_cmake_copyright_ARGS
+    EXCLUDE
+    "extern"
+    "CONTRIBUTING.md"
+    "LICENSE"
+    "README.md"
+  )
 
   ament_lint_auto_find_test_dependencies()
 endif()
