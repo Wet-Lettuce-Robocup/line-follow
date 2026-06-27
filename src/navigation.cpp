@@ -51,6 +51,7 @@ NavigationNode::NavigationNode()
   this->gatingThreshold = this->get_parameter("gating_threshold").as_int();
   this->searchMinDist = this->get_parameter("search_min_dist").as_int();
   this->pixelSize = this->get_parameter("pixel_size").as_double();
+  this->frameCentre = cv::Point(100, 70);
 
   std::string nav_type_str = this->get_parameter("navigation_type").as_string();
 
@@ -59,7 +60,6 @@ NavigationNode::NavigationNode()
     {"advanced", NavigationType::ADVANCED}
   };
 
-  this->minEdgeSize = 5;
 
   auto it = nav_type_map.find(nav_type_str);
 
@@ -801,7 +801,7 @@ void NavigationNode::updateGraph()
     std::vector<int> newIDs;
 
     for (const Node & node : this->graph.nodes) {
-      TrackedNode newNode(node.pos);
+      TrackedNode newNode(this->localToGlobalFrame(node.pos));
 
       newNode.id = graph.nextID++;
       newNode.is_endpoint = node.is_endpoint;
@@ -1022,10 +1022,10 @@ void NavigationNode::edgeToTracked(const Edge & edge, TrackedEdge & tracked)
   tracked.age = 0;
 
   tracked.angleFromSrc = this->calculateAngle(
-      this->graph.nodeFromID(edge.src)->pos, edge.path[this->minEdgeSize - 1]);
+      this->graph.nodeFromID(edge.src)->pos, edge.path[this->minEdgeSize - 1]) + this->angle;
   tracked.angleFromDst =
     this->calculateAngle(this->graph.nodeFromID(edge.dst)->pos,
-                           edge.path[edge.path.size() - this->minEdgeSize]);
+                           edge.path[edge.path.size() - this->minEdgeSize]) + this->angle;
   tracked.path = edge.path;
 }
 
