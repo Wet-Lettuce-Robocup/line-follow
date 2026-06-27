@@ -39,6 +39,13 @@ NavigationNode::NavigationNode()
 : rclcpp_lifecycle::LifecycleNode("navigation")
 {
   this->declare_parameter<std::string>("navigation_type", "simple");
+  this->declare_parameter<int>("path_limit", 5);
+  this->declare_parameter<int>("min_edge_size", 25);
+  this->declare_parameter<int>("gating_threshold", 50);
+
+  this->pathLimit = this->get_parameter("path_limit").as_int();
+  this->minEdgeSize = this->get_parameter("min_edge_size").as_int();
+  this->gatingThreshold = this->get_parameter("gating_threshold").as_int();
 
   std::string nav_type_str = this->get_parameter("navigation_type").as_string();
 
@@ -46,6 +53,8 @@ NavigationNode::NavigationNode()
     {"simple", NavigationType::SIMPLE},
     {"advanced", NavigationType::ADVANCED}
   };
+
+  this->minEdgeSize = 5;
 
   auto it = nav_type_map.find(nav_type_str);
 
@@ -650,6 +659,12 @@ double NavigationNode::calculateAngle(cv::Point point1, cv::Point point2)
   return angle;
 }
 
+double NavigationNode::calculateDist(cv::Point point1, cv::Point point2)
+{
+  return std::sqrt(std::pow(point1.x - point2.x, 2) +
+                   std::pow(point1.y - point2.y, 2));
+}
+
 Node NavigationNode::followToNode(std::vector<cv::Point> & path)
 {
   cv::Point current = path[path.size() - 1];
@@ -1013,10 +1028,82 @@ void NavigationNode::findStartingEdge(
     src->pos.y > dst->pos.y ? (*currentEdge)->dst : (*currentEdge)->src;
 }
 
+double NavigationNode::wrapAngle(double angle)
+{
+  constexpr double two_pi = 2.0 * std::numbers::pi;
+  double wrapped = std::remainder(angle, two_pi);
+
+  if (wrapped == -std::numbers::pi) {
+    wrapped = std::numbers::pi;
+  }
+
+  return wrapped;
+}
+
+double NavigationNode::addAngles(double angle1, double angle2)
+{
+  double sum = angle1 + angle2;
+  double wrapped = this->wrapAngle(sum);
+  return wrapped;
+}
+
 void NavigationNode::findNextTarget(
   int & trackingID,
   TrackedEdge **currentEdge)
 {
+  if (this->searchLineBreak) {
+    if (this->trackedGraph.nodes.size() == 0) {
+      return;
+    }
+
+    std::vector<TrackedNode> nodesInRange;
+
+    for (TrackedNode & node : this->trackedGraph.nodes) {
+      double dist = this->searchDistance(node.pos);
+      if (dist > this->searchMinDist) {
+        continue;
+      }
+
+      nodesInRange.push_back(node);
+    }
+
+    if (nodesInRange.size() == 0) {
+      return;
+    }
+
+    TrackedNode closestNode = nodesInRange[0];
+    double closestDist =
+      this->calculateDist(this->searchLastPoint, closestNode.pos);
+
+    for (TrackedNode & node : nodesInRange) {
+      double dist = this->calculateDist(this->searchLastPoint, node.pos);
+
+      if (dist > closestDist) {
+        continue;
+      }
+
+      closestDist = dist;
+      closestNode = node;
+    }
+
+    std::vector<TrackedEdge *> surroundingEdges;
+
+    for (TrackedEdge & edge : this->trackedGraph.edges) {
+      if (edge.src == closestNode.id || edge.dst == closestNode.id) {
+        surroundingEdges.push_back(&edge);
+      }
+    }
+
+    TrackedEdge *newEdge = this->closestToAngle(
+        closestNode.id, surroundingEdges, this->searchDirection);
+    int newTarget =
+      closestNode.id == newEdge->src ? newEdge->dst : newEdge->src;
+
+    this->currentTarget = newTarget;
+    this->currentEdge = newEdge;
+    this->searchLineBreak = false;
+  }
+
   if (!currentEdge || trackingID < 0) {
     *currentEdge = new TrackedEdge;
     this->findStartingEdge(trackingID, currentEdge);
@@ -1036,7 +1123,15 @@ void NavigationNode::findNextTarget(
   if (currentNode.screen_edge) {
     return;
   } else if (currentNode.is_endpoint) {
-    // TODO logic for breaks in line
+    this->searchLineBreak = true;
+    this->searchLastNode = currentNode.id;
+    this->searchLastPoint = currentNode.pos;
+    double currentDir = trackingID == (*currentEdge)->src ?
+      (*currentEdge)->angleFromSrc :
+      (*currentEdge)->angleFromDst;
+    this->searchDirection = this->addAngles(currentDir, std::numbers::pi);
+
+
     return;
   }
 
@@ -1060,9 +1155,7 @@ void NavigationNode::findNextTarget(
 
   if (surroundingEdges.size() < 3) {
 
-    double targetAngle =
-      std::fmod(currentAngle + std::numbers::pi, 2 * std::numbers::pi) -
-      std::numbers::pi;
+    double targetAngle = this->addAngles(currentAngle, std::numbers::pi);
 
     TrackedEdge *closestEdge =
       this->closestToAngle(trackingID, surroundingEdges, targetAngle);
@@ -1078,8 +1171,7 @@ void NavigationNode::findNextTarget(
   double minGreenDist = 40;
 
   for (cv::Point greenPos : this->green) {
-    double dist = std::sqrt(std::pow(greenPos.x - currentNode.pos.x, 2) +
-                            std::pow(greenPos.y - currentNode.pos.y, 2));
+    double dist = this->calculateDist(greenPos, currentNode.pos);
     if (dist > minGreenDist) {
       continue;
     }
@@ -1088,15 +1180,9 @@ void NavigationNode::findNextTarget(
     surroundingGreen.push_back(angle);
   }
 
-  double targetLeft =
-    std::fmod(currentAngle - std::numbers::pi / 2, 2 * std::numbers::pi) -
-    std::numbers::pi;
-  double targetRight =
-    std::fmod(currentAngle + std::numbers::pi / 2, 2 * std::numbers::pi) -
-    std::numbers::pi;
-  double targetStraight =
-    std::fmod(currentAngle + std::numbers::pi, 2 * std::numbers::pi) -
-    std::numbers::pi;
+  double targetLeft = this->addAngles(currentAngle, -std::numbers::pi / 2);
+  double targetRight = this->addAngles(currentAngle, std::numbers::pi / 2);
+  double targetStraight = this->addAngles(currentAngle, std::numbers::pi);
 
   TrackedEdge *leftEdge =
     this->closestToAngle(trackingID, surroundingEdges, targetLeft);
@@ -1109,8 +1195,7 @@ void NavigationNode::findNextTarget(
   bool greenRight = false;
 
   for (double & greenAngle : surroundingGreen) {
-    double diff = currentAngle - greenAngle;
-    diff = std::atan2(std::sin(diff), std::cos(diff));
+    double diff = this->addAngles(currentAngle, -greenAngle);
 
     if (diff < 0 && diff > -std::numbers::pi / 2) {
       greenLeft = true;
@@ -1136,6 +1221,27 @@ void NavigationNode::findNextTarget(
     (*currentEdge)->src;
 }
 
+double NavigationNode::searchDistance(cv::Point point)
+{
+  double sinTheta = std::sin(this->searchDirection);
+  double cosTheta = std::cos(this->searchDirection);
+
+  // Vector from startPoint to targetPoint
+  double dx = point.x - this->searchLastPoint.x;
+  double dy = point.y - this->searchLastPoint.y;
+
+  // Project the target point onto the line's direction vector (Dot Product)
+  double projection = dx * cosTheta + dy * sinTheta;
+
+  if (projection < 0.0) {
+    // The point is "behind" the starting point.
+    // Return the straight-line Euclidean distance to the startPoint.
+    return 50 * std::sqrt(dx * dx + dy * dy);
+  }
+
+  return std::abs(dx * sinTheta - dy * cosTheta);
+}
+
 TrackedEdge *
 NavigationNode::closestToAngle(
   int currentNode,
@@ -1151,12 +1257,8 @@ NavigationNode::closestToAngle(
     double angle =
       currentNode == edge->src ? edge->angleFromSrc : edge->angleFromDst;
 
-    double closestDiff = targetAngle - closestAngle;
-    closestDiff =
-      std::abs(std::atan2(std::sin(closestDiff), std::cos(closestDiff)));
-
-    double diff = targetAngle - angle;
-    diff = std::abs(std::atan2(std::sin(diff), std::cos(diff)));
+    double closestDiff = std::abs(this->addAngles(targetAngle, -closestAngle));
+    double diff = std::abs(this->addAngles(targetAngle, -angle));
 
     if (diff < closestDiff) {
       closestAngle = angle;

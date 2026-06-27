@@ -138,6 +138,7 @@ private:
 
   void findNextNode(std::vector<Node> & path);
   double calculateAngle(cv::Point point1, cv::Point point2);
+  double calculateDist(cv::Point point1, cv::Point point2);
 
   void updateGraph();
 
@@ -145,12 +146,17 @@ private:
 
   void edgeToTracked(const Edge & edge, TrackedEdge & trackedEdge);
 
+  double wrapAngle(double angle);
+  double addAngles(double angle1, double angle2);
+
   void findStartingEdge(int & trackingID, TrackedEdge **currentEdge);
   void findNextTarget(int & trackingID, TrackedEdge **currentEdge);
   TrackedEdge * closestToAngle(
     int currentNode,
     std::vector<TrackedEdge *> currentEdges,
     double targetAngle);
+
+  double searchDistance(cv::Point point);
 
   cv::Mat rawImage;
   cv::Mat skeletonizedImage;
@@ -161,7 +167,12 @@ private:
 
   int currentTarget = -1;
   TrackedEdge *currentEdge = nullptr;
-  bool searchingLineBreak;
+
+  bool searchLineBreak = false;
+  int searchLastNode;
+  cv::Point searchLastPoint;
+  double searchDirection;
+  double searchMinDist = 100;
 
   cv::VideoWriter writer;
 };
