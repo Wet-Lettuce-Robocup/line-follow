@@ -24,6 +24,7 @@
 #include <opencv2/ximgproc.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
+#include "nav_msgs/msg/odometry.hpp"
 #include <lifecycle_msgs/msg/state.hpp>
 #include <cstdint>
 #include <functional>
@@ -42,10 +43,14 @@ NavigationNode::NavigationNode()
   this->declare_parameter<int>("path_limit", 5);
   this->declare_parameter<int>("min_edge_size", 25);
   this->declare_parameter<int>("gating_threshold", 50);
+  this->declare_parameter<int>("search_min_dist", 20);
+  this->declare_parameter<double>("pixel_size", 0.01);
 
   this->pathLimit = this->get_parameter("path_limit").as_int();
   this->minEdgeSize = this->get_parameter("min_edge_size").as_int();
   this->gatingThreshold = this->get_parameter("gating_threshold").as_int();
+  this->searchMinDist = this->get_parameter("search_min_dist").as_int();
+  this->pixelSize = this->get_parameter("pixel_size").as_double();
 
   std::string nav_type_str = this->get_parameter("navigation_type").as_string();
 
@@ -87,6 +92,10 @@ CallbackReturn NavigationNode::on_configure(const rclcpp_lifecycle::State &)
   this->imageSub =
     this->create_subscription<sensor_msgs::msg::Image>("/down_camera/camera_node/image_raw", 10,
     std::bind(&NavigationNode::imageCallback, this, _1));
+  this->odomSub =
+    this->create_subscription<nav_msgs::msg::Odometry>("/odom", 10,
+    std::bind(&NavigationNode::odomCallback, this, _1));
+
 
   return CallbackReturn::SUCCESS;
 }
@@ -109,6 +118,7 @@ CallbackReturn NavigationNode::on_cleanup(const rclcpp_lifecycle::State &)
 {
   this->errorPub.reset();
   this->imageSub.reset();
+  this->odomSub.reset();
 
   return CallbackReturn::SUCCESS;
 }
@@ -196,6 +206,13 @@ void NavigationNode::imageCallback(sensor_msgs::msg::Image::SharedPtr msg)
       this->advancedNavigation(frame);
       break;
   }
+}
+
+void NavigationNode::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
+{
+  this->x = msg->pose.pose.position.x;
+  this->y = -msg->pose.pose.position.y;
+  this->angle = msg->pose.pose.position.z;
 }
 
 void NavigationNode::publishError(double error)
@@ -337,6 +354,16 @@ cv::Mat NavigationNode::processImage(cv::Mat & image)
   skeleton(right_border_roi).setTo(0);
 
   return skeleton;
+}
+
+cv::Point NavigationNode::localToGlobalFrame(cv::Point point)
+{
+  cv::Point relative = point - this->frameCentre;
+  float rotatedX = relative.x * std::cos(this->angle) - relative.y * std::sin(this->angle);
+  float rotatedY = relative.x * std::sin(this->angle) + relative.y * std::cos(this->angle);
+
+  cv::Point newCenter = cv::Point2f(this->x, this->y) / this->pixelSize;
+  return newCenter + cv::Point(rotatedX, rotatedY);
 }
 
 std::vector<cv::Point> NavigationNode::extractGreen(cv::Mat & image)

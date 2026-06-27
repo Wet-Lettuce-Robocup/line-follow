@@ -18,9 +18,11 @@
 #include <rclcpp/publisher.hpp>
 #include <rclcpp/subscription.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
+#include "nav_msgs/msg/odometry.hpp"
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <opencv2/opencv.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 
 struct Node
 {
@@ -106,10 +108,13 @@ public:
   uint32_t pathLimit;
   uint32_t minEdgeSize;
   uint32_t gatingThreshold;
+  double pixelSize;
+  cv::Point frameCentre;
   NavigationType navigationType;
 
 private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr imageSub;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float64>> errorPub;
 
   cv::Point cvtPoint(cv::Mat & src, cv::Mat & dst, cv::Point point);
@@ -118,11 +123,13 @@ private:
   void advancedNavigation(cv::Mat & frame);
 
   void imageCallback(sensor_msgs::msg::Image::SharedPtr msg);
+  void odomCallback(nav_msgs::msg::Odometry::SharedPtr msg);
   double simpleError(const cv::Mat & frame);
   void publishError(double error);
 
   cv::Mat processImage(cv::Mat & image);
   cv::Mat applyThreshold(cv::Mat & image);
+  cv::Point localToGlobalFrame(cv::Point point);
 
   std::vector<cv::Point> extractGreen(cv::Mat & image);
   void extractNodes();
@@ -168,11 +175,15 @@ private:
   int currentTarget = -1;
   TrackedEdge *currentEdge = nullptr;
 
+  double x = 0;
+  double y = 0;
+  double angle = 0;
+
   bool searchLineBreak = false;
   int searchLastNode;
   cv::Point searchLastPoint;
   double searchDirection;
-  double searchMinDist = 100;
+  double searchMinDist;
 
   cv::VideoWriter writer;
 };
