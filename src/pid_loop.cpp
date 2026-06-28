@@ -28,7 +28,7 @@ PIDLoop::PIDLoop()
   this->declare_parameter<double>("kp", 0.1);
   this->declare_parameter<double>("ki", 0.0);
   this->declare_parameter<double>("kd", 0.0);
-  this->declare_parameter<double>("default_speed", 0.05);
+  this->declare_parameter<double>("default_speed", 0.01);
 
   this->kp = this->get_parameter("kp").as_double();
   this->ki = this->get_parameter("ki").as_double();

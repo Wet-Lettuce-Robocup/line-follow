@@ -71,7 +71,7 @@ NavigationNode::NavigationNode()
   }
 
   int fourcc = cv::VideoWriter::fourcc('x', 'v', 'i', 'd');
-  cv::Size frameSize = cv::Size(1536 * 0.8, 864 * 0.6);
+  cv::Size frameSize = cv::Size(480, 854);
   double fps = 30.0;
 
   this->writer = cv::VideoWriter("/videos/output.avi", cv::CAP_GSTREAMER, fourcc,
@@ -217,7 +217,7 @@ void NavigationNode::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 
 void NavigationNode::publishError(double error)
 {
-  // RCLCPP_INFO(this->get_logger(), "Publishing error: %f", error);
+  RCLCPP_INFO(this->get_logger(), "Publishing error: %f", error);
   std_msgs::msg::Float64 msg = std_msgs::msg::Float64();
   msg.data = error;
   this->errorPub->publish(msg);
@@ -235,7 +235,12 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // 3. Define the Region of Interest (ROI) and crop
   cv::Rect roi(x, y, newWidth, newHeight);
   cv::Mat croppedImg = frame(roi);
-  cv::Mat thresh = this->applyThreshold(croppedImg);
+
+  cv::Mat resized;
+  cv::Size dsize(854, 480);
+  cv::resize(croppedImg, resized, dsize);
+
+  cv::Mat thresh = this->applyThreshold(resized, 255, 35);
     // 3. Find contours
   std::vector<std::vector<cv::Point>> contours;
   cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
@@ -276,6 +281,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
 
   cv::Mat processed;
   cv::cvtColor(thresh, processed, cv::COLOR_GRAY2BGR);
+  RCLCPP_INFO(this->get_logger(), "Thresh size: %i x %i, %i channels.", processed.cols, processed.rows, processed.channels());
   this->writer.write(processed);
 
   return error;
@@ -286,12 +292,13 @@ void NavigationNode::simpleNavigation(cv::Mat & frame)
 {
   double error = this->simpleError(frame);
 
-  this->publishError(error / 200);
+  this->publishError(error / 2000);
 }
 
 void NavigationNode::advancedNavigation(cv::Mat & frame)
 {
   cv::Mat processed = this->processImage(frame);
+  this->skeletonizedImage = processed;
   this->extractNodes();
   this->extractEdges();
   this->removeShortEdges(this->graph.edges);
@@ -300,19 +307,19 @@ void NavigationNode::advancedNavigation(cv::Mat & frame)
   this->findNextTarget(this->currentTarget, &this->currentEdge);
 }
 
-cv::Mat NavigationNode::applyThreshold(cv::Mat & image)
+cv::Mat NavigationNode::applyThreshold(cv::Mat & image, uint32_t threshSize, uint32_t kernelSize)
 {
   cv::Mat gray, binary;
   cvtColor(image, gray, cv::COLOR_BGR2GRAY);
-  GaussianBlur(gray, gray, cv::Size(5, 5), 0);
+  GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), 0);
 
   cv::adaptiveThreshold(gray, binary, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C,
-                        cv::THRESH_BINARY_INV, 55, 10);
+                        cv::THRESH_BINARY_INV, threshSize, 10);
 
   // cv::threshold(gray, binary, 120, 255, cv::THRESH_BINARY_INV);
   // binary = this->applySmoothVariableThreshold(gray);
 
-  cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+  cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(kernelSize, kernelSize));
 
   cv::Mat opened_image;
   cv::morphologyEx(binary, opened_image, cv::MORPH_OPEN, kernel);
@@ -329,7 +336,7 @@ cv::Mat NavigationNode::processImage(cv::Mat & image)
   cv::Size dsize(200, 100);
   cv::resize(image, resized, dsize);
 
-  cv::Mat binary = this->applyThreshold(resized);
+  cv::Mat binary = this->applyThreshold(resized, 55, 5);
 
   cv::Mat skeleton;
   cv::ximgproc::thinning(binary, skeleton,

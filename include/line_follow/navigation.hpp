@@ -128,7 +128,7 @@ private:
   void publishError(double error);
 
   cv::Mat processImage(cv::Mat & image);
-  cv::Mat applyThreshold(cv::Mat & image);
+  cv::Mat applyThreshold(cv::Mat & image, uint32_t threshSize, uint32_t kernelSize);
   cv::Point localToGlobalFrame(cv::Point point);
 
   std::vector<cv::Point> extractGreen(cv::Mat & image);
