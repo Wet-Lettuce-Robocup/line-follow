@@ -28,7 +28,7 @@ PIDLoop::PIDLoop()
   this->declare_parameter<double>("kp", 0.1);
   this->declare_parameter<double>("ki", 0.0);
   this->declare_parameter<double>("kd", 0.0);
-  this->declare_parameter<int>("default_speed", 100);
+  this->declare_parameter<int>("default_speed", 50);
 
   this->kp = this->get_parameter("kp").as_double();
   this->ki = this->get_parameter("ki").as_double();
@@ -123,14 +123,16 @@ void PIDLoop::sendManualI2C(int32_t error)
     return;
   }
 
+  uint32_t speed = this->defaultSpeed - 0.3 * std::abs(error);
+
   uint8_t buffer[13];
 
   buffer[0] = 0x01;
 
-  buffer[1] = (this->defaultSpeed >> 24) & 0xFF;
-  buffer[2] = (this->defaultSpeed >> 16) & 0xFF;
-  buffer[3] = (this->defaultSpeed >> 8) & 0xFF;
-  buffer[4] = this->defaultSpeed & 0xFF;
+  buffer[1] = (speed >> 24) & 0xFF;
+  buffer[2] = (speed >> 16) & 0xFF;
+  buffer[3] = (speed >> 8) & 0xFF;
+  buffer[4] = speed & 0xFF;
 
   buffer[5] = 0;
   buffer[6] = 0;

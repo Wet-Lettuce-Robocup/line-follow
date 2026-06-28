@@ -188,10 +188,10 @@ void NavigationNode::imageCallback(sensor_msgs::msg::Image::SharedPtr msg)
     return;
   }
 
-  cv_bridge::CvImagePtr cv_ptr;
+  cv_bridge::CvImageConstPtr cv_ptr;
 
   try {
-    cv_ptr = cv_bridge::toCvCopy(msg);
+    cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::BGR8);
   } catch (cv_bridge::Exception & e) {
     RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
   }
@@ -219,7 +219,7 @@ void NavigationNode::publishError(double error)
 {
   RCLCPP_INFO(this->get_logger(), "Publishing error: %f", error);
   std_msgs::msg::Float64 msg = std_msgs::msg::Float64();
-  msg.data = error;
+  msg.data = error * 1.5;
   this->errorPub->publish(msg);
 }
 
@@ -293,7 +293,7 @@ void NavigationNode::simpleNavigation(cv::Mat & frame)
 {
   double error = this->simpleError(frame);
 
-  this->publishError(error / 2);
+  this->publishError(2 * error);
 }
 
 void NavigationNode::advancedNavigation(cv::Mat & frame)

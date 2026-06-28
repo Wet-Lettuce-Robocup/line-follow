@@ -2,3 +2,10 @@
   navigation:
     ros__parameters:
       navigation_type: 'simple'
+      use_intra_process_comms: true
+      qos_overrides:
+        /camera/image_raw:
+          publisher:
+            reliability: best_effort
+            history: keep_last
+            depth: 1
