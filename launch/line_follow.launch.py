@@ -16,37 +16,45 @@
 import os
 
 from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
 
 
-def get_line_follow_components():
+def generate_launch_description():
     config = os.path.join(
         get_package_share_directory('line_follow'), 'config', 'params.yaml'
     )
 
-    return [
-        ComposableNode(
-            package='line_follow',
-            executable='core_loop',
-            name='core_loop',
-            namespace='line_follow',
-            output='screen',
-            parameters=[config],
-        ),
-        ComposableNode(
-            package='line_follow',
-            executable='navigation',
-            name='navigation',
-            namespace='line_follow',
-            output='screen',
-            parameters=[config],
-        ),
-        ComposableNode(
-            package='line_follow',
-            executable='pid_loop',
-            name='pid_loop',
-            namespace='line_follow',
-            output='screen',
-            parameters=[config],
-        ),
-    ]
+    core_loop = ComposableNode(
+        package='line_follow',
+        plugin='core_loop::CoreLoop',
+        name='core_loop',
+        namespace='line_follow',
+        parameters=[config],
+    )
+    navigation = ComposableNode(
+        package='line_follow',
+        plugin='navigation::NavigationNode',
+        name='navigation',
+        namespace='line_follow',
+        parameters=[config],
+    )
+    pid_loop = ComposableNode(
+        package='line_follow',
+        plugin='pid_loop::PIDLoop',
+        name='pid_loop',
+        namespace='line_follow',
+        parameters=[config],
+    )
+
+    container = ComposableNodeContainer(
+        name='line_follow_container',
+        namespace='',
+        package='rclcpp_components',
+        executable='component_manager',
+        composable_node_descriptions=[core_loop, navigation, pid_loop],
+        output='screen',
+    )
+
+    return LaunchDescription([container])
