@@ -28,12 +28,12 @@ PIDLoop::PIDLoop()
   this->declare_parameter<double>("kp", 0.1);
   this->declare_parameter<double>("ki", 0.0);
   this->declare_parameter<double>("kd", 0.0);
-  this->declare_parameter<double>("default_speed", 0.01);
+  this->declare_parameter<int>("default_speed", 100);
 
   this->kp = this->get_parameter("kp").as_double();
   this->ki = this->get_parameter("ki").as_double();
   this->kd = this->get_parameter("kd").as_double();
-  this->defaultSpeed = this->get_parameter("default_speed").as_double();
+  this->defaultSpeed = this->get_parameter("default_speed").as_int();
 }
 
 CallbackReturn PIDLoop::on_configure(const rclcpp_lifecycle::State &)
@@ -95,11 +95,64 @@ void PIDLoop::errorCallback(std_msgs::msg::Float64::SharedPtr msg)
   this->lastError = error;
   this->lastTime = currentTime;
 
+  double sum = error * this->kp + this->integral * this->ki + derivative * this->kd;
+  this->sendManualI2C(static_cast<int32_t>(sum));
+  return;
+
   auto twist_msg = geometry_msgs::msg::Twist();
   twist_msg.linear.x = this->defaultSpeed;
   twist_msg.angular.z = error * this->kp + this->integral * this->ki + derivative * this->kd;
 
   this->twistPub->publish(twist_msg);
+}
+
+void PIDLoop::sendManualI2C(int32_t error)
+{
+  const char * device = "/dev/i2c-1";
+  int i2c_fd = open(device, O_RDWR);
+
+  if (i2c_fd < 0) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to open the I2C bus: %s", device);
+    return;
+  }
+
+  int slave_address = 0x67;
+  if (ioctl(i2c_fd, I2C_SLAVE, slave_address) < 0) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to acquire bus access/talk to slave.");
+    close(i2c_fd);
+    return;
+  }
+
+  uint8_t buffer[13];
+
+  buffer[0] = 0x01;
+
+  buffer[1] = (this->defaultSpeed >> 24) & 0xFF;
+  buffer[2] = (this->defaultSpeed >> 16) & 0xFF;
+  buffer[3] = (this->defaultSpeed >> 8) & 0xFF;
+  buffer[4] = this->defaultSpeed & 0xFF;
+
+  buffer[5] = 0;
+  buffer[6] = 0;
+  buffer[7] = 0;
+  buffer[8] = 0;
+
+  buffer[9] = (error >> 24) & 0xFF;
+  buffer[10] = (error >> 16) & 0xFF;
+  buffer[11] = (error >> 8) & 0xFF;
+  buffer[12] = error & 0xFF;
+
+  ssize_t bytes_written = write(i2c_fd, buffer, sizeof(buffer));
+
+  if (bytes_written != sizeof(buffer)) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to write to the I2C bus.");
+    close(i2c_fd);
+    return;
+  }
+
+  RCLCPP_INFO(this->get_logger(), "Successfully sent %ld bytes over I2C!", bytes_written);
+
+  close(i2c_fd);
 }
 
 int main(int argc, char ** argv)

@@ -19,6 +19,10 @@
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/i2c-dev.h>
 
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
@@ -41,11 +45,12 @@ private:
   double ki;
   double kd;
 
-  double defaultSpeed;
+  int32_t defaultSpeed;
 
   double integral;
   double lastError;
   rclcpp::Time lastTime;
 
   void errorCallback(std_msgs::msg::Float64::SharedPtr error);
+  void sendManualI2C(int32_t error);
 };

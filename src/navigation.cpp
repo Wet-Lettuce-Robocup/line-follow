@@ -281,7 +281,8 @@ double NavigationNode::simpleError(const cv::Mat & frame)
 
   cv::Mat processed;
   cv::cvtColor(thresh, processed, cv::COLOR_GRAY2BGR);
-  RCLCPP_INFO(this->get_logger(), "Thresh size: %i x %i, %i channels.", processed.cols, processed.rows, processed.channels());
+  RCLCPP_INFO(this->get_logger(), "Thresh size: %i x %i, %i channels.", processed.cols,
+    processed.rows, processed.channels());
   this->writer.write(processed);
 
   return error;
@@ -292,7 +293,7 @@ void NavigationNode::simpleNavigation(cv::Mat & frame)
 {
   double error = this->simpleError(frame);
 
-  this->publishError(error / 2000);
+  this->publishError(error / 2);
 }
 
 void NavigationNode::advancedNavigation(cv::Mat & frame)
