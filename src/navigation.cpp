@@ -89,12 +89,16 @@ CallbackReturn NavigationNode::on_configure(const rclcpp_lifecycle::State &)
 {
   RCLCPP_INFO(this->get_logger(), "Configuring...");
   this->errorPub = this->create_publisher<std_msgs::msg::Float64>("line_error", 10);
+  this->lineCompletePub = this->create_publisher<std_msgs::msg::Bool>("rescue_active", 10);
   this->imageSub =
     this->create_subscription<sensor_msgs::msg::Image>("/down_camera/camera_node/image_raw", 10,
     std::bind(&NavigationNode::imageCallback, this, _1));
   this->odomSub =
     this->create_subscription<nav_msgs::msg::Odometry>("/odom", 10,
     std::bind(&NavigationNode::odomCallback, this, _1));
+  this->silverSub =
+    this->create_subscription<std_msgs::msg::Bool>("/silver_present", 10,
+    std::bind(&NavigationNode::silverCallback, this, _1));
 
 
   return CallbackReturn::SUCCESS;
@@ -103,6 +107,7 @@ CallbackReturn NavigationNode::on_configure(const rclcpp_lifecycle::State &)
 CallbackReturn NavigationNode::on_activate(const rclcpp_lifecycle::State & state)
 {
   this->errorPub->on_activate();
+  this->lineCompletePub->on_activate();
 
   return rclcpp_lifecycle::LifecycleNode::on_activate(state);
 }
@@ -110,6 +115,7 @@ CallbackReturn NavigationNode::on_activate(const rclcpp_lifecycle::State & state
 CallbackReturn NavigationNode::on_deactivate(const rclcpp_lifecycle::State & state)
 {
   this->errorPub->on_deactivate();
+  this->lineCompletePub->on_deactivate();
 
   return rclcpp_lifecycle::LifecycleNode::on_deactivate(state);
 }
@@ -181,6 +187,15 @@ std::vector<std::vector<double>> TrackedGraph::getCostMatrix(Graph & graph)
   return costs;
 }
 
+
+void NavigationNode::silverCallback(std_msgs::msg::Bool::SharedPtr msg)
+{
+  this->state = COMPLETE;
+
+  std_msgs::msg::Bool pubMsg = std_msgs::msg::Bool();
+  pubMsg.data = true;
+  this->lineCompletePub->publish(pubMsg);
+}
 
 void NavigationNode::imageCallback(sensor_msgs::msg::Image::SharedPtr msg)
 {

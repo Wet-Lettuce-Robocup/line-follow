@@ -20,6 +20,7 @@
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include "nav_msgs/msg/odometry.hpp"
 #include <sensor_msgs/msg/image.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <opencv2/opencv.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -93,6 +94,15 @@ enum NavigationType
   ADVANCED
 };
 
+enum LineFollowState
+{
+  FOLLOWING,
+  TOWER_ROTATE_START,
+  TOWER_MOVE,
+  TOWER_ROTATE_END,
+  COMPLETE
+};
+
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
 class NavigationNode : public rclcpp_lifecycle::LifecycleNode {
@@ -115,7 +125,11 @@ public:
 private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr imageSub;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr silverSub;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float64>> errorPub;
+  std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Bool>> lineCompletePub;
+
+  LineFollowState state;
 
   cv::Point cvtPoint(cv::Mat & src, cv::Mat & dst, cv::Point point);
 
@@ -124,6 +138,7 @@ private:
 
   void imageCallback(sensor_msgs::msg::Image::SharedPtr msg);
   void odomCallback(nav_msgs::msg::Odometry::SharedPtr msg);
+  void silverCallback(std_msgs::msg::Bool::SharedPtr msg);
   double simpleError(const cv::Mat & frame);
   void publishError(double error);
 
