@@ -28,21 +28,21 @@ def generate_launch_description():
 
     core_loop = ComposableNode(
         package='line_follow',
-        plugin='core_loop::CoreLoop',
+        plugin='CoreLoop',
         name='core_loop',
         namespace='line_follow',
         parameters=[config],
     )
     navigation = ComposableNode(
         package='line_follow',
-        plugin='navigation::NavigationNode',
+        plugin='NavigationNode',
         name='navigation',
         namespace='line_follow',
         parameters=[config],
     )
     pid_loop = ComposableNode(
         package='line_follow',
-        plugin='pid_loop::PIDLoop',
+        plugin='PIDLoop',
         name='pid_loop',
         namespace='line_follow',
         parameters=[config],

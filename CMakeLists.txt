@@ -59,7 +59,7 @@ target_include_directories(navigation_plugin PUBLIC
 )
 
 rclcpp_components_register_nodes(navigation_plugin
-  "line_follow::NavigationNode"
+  "NavigationNode"
 )
 
 # =================================================================
@@ -81,7 +81,7 @@ target_include_directories(core_loop_plugin PUBLIC
 )
 
 rclcpp_components_register_nodes(core_loop_plugin
-  "core_loop::CoreLoop"
+  "CoreLoop"
 )
 
 # =================================================================
@@ -104,7 +104,7 @@ target_include_directories(pid_loop_plugin PUBLIC
 )
 
 rclcpp_components_register_nodes(pid_loop_plugin
-  "pid_loop::PIDLoop"
+  "PIDLoop"
 )
 
 # =================================================================
