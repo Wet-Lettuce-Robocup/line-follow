@@ -36,8 +36,8 @@
 
 using std::placeholders::_1;
 
-NavigationNode::NavigationNode()
-: rclcpp_lifecycle::LifecycleNode("navigation")
+NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
+: rclcpp_lifecycle::LifecycleNode("navigation", options)
 {
   this->declare_parameter<std::string>("navigation_type", "simple");
   this->declare_parameter<int>("path_limit", 5);
@@ -1322,8 +1322,11 @@ NavigationNode::closestToAngle(
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<NavigationNode>();
+  auto node = std::make_shared<NavigationNode>(rclcpp::NodeOptions());
   rclcpp::spin(node->get_node_base_interface());
   rclcpp::shutdown();
   return 0;
 }
+
+#include "rclcpp_components/register_node_macro.hpp"
+RCLCPP_COMPONENTS_REGISTER_NODE(NavigationNode);

@@ -26,8 +26,8 @@
 
 #include <memory>
 
-CoreLoop::CoreLoop()
-: rclcpp_lifecycle::LifecycleNode("core_loop")
+CoreLoop::CoreLoop(const rclcpp::NodeOptions & options)
+: rclcpp_lifecycle::LifecycleNode("core_loop", options)
 {
   RCLCPP_INFO(this->get_logger(), "test");
 
@@ -125,8 +125,11 @@ CallbackReturn CoreLoop::on_shutdown(const rclcpp_lifecycle::State &)
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<CoreLoop>();
+  auto node = std::make_shared<CoreLoop>(rclcpp::NodeOptions());
   rclcpp::spin(node->get_node_base_interface());
   rclcpp::shutdown();
   return 0;
 }
+
+#include "rclcpp_components/register_node_macro.hpp"
+RCLCPP_COMPONENTS_REGISTER_NODE(CoreLoop);

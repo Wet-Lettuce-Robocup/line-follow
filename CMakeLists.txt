@@ -20,6 +20,7 @@ add_library(hungarian-algorithm-cpp STATIC
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -28,6 +29,104 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
+
+# Plugins
+
+# =================================================================
+# PLUGIN 1: NAVIGATION
+# =================================================================
+add_library(navigation_plugin SHARED src/navigation.cpp)
+
+target_link_libraries(navigation_plugin PUBLIC
+  ${sensor_msgs_TARGETS}
+  ${nav_msgs_TARGETS}
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  rclcpp_components::component
+  ${std_msgs_TARGETS}
+  cv_bridge::cv_bridge
+  ${OpenCV_LIBRARIES}
+  hungarian-algorithm-cpp
+)
+
+target_include_directories(navigation_plugin PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/extern/hungarian-algorithm-cpp
+)
+
+rclcpp_components_register_nodes(navigation_plugin
+  "line_follow::NavigationNode"
+)
+
+# =================================================================
+# PLUGIN 2: CORE LOOP
+# =================================================================
+add_library(core_loop_plugin SHARED src/core_loop.cpp)
+
+target_link_libraries(core_loop_plugin PUBLIC
+  ${lifecycle_msgs_TARGETS}
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  rclcpp_components::component
+  ${std_msgs_TARGETS}
+)
+
+target_include_directories(core_loop_plugin PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+rclcpp_components_register_nodes(core_loop_plugin
+  "core_loop::CoreLoop"
+)
+
+# =================================================================
+# PLUGIN 3: PID LOOP
+# =================================================================
+add_library(pid_loop_plugin SHARED src/pid_loop.cpp)
+
+target_link_libraries(pid_loop_plugin PUBLIC
+  ${lifecycle_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  rclcpp_components::component
+  ${std_msgs_TARGETS}
+)
+
+target_include_directories(pid_loop_plugin PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+rclcpp_components_register_nodes(pid_loop_plugin
+  "pid_loop::PIDLoop"
+)
+
+# =================================================================
+# INSTALLATION
+# =================================================================
+install(TARGETS
+  navigation_plugin
+  core_loop_plugin
+  pid_loop_plugin
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+# Install executable permissions so your original `main()` blocks work standalone
+# via `ros2 run line_follow navigation_plugin` if desired
+install(PROGRAMS
+  ${CMAKE_CURRENT_BINARY_DIR}/libnavigation_plugin.so
+  ${CMAKE_CURRENT_BINARY_DIR}/libcore_loop_plugin.so
+  ${CMAKE_CURRENT_BINARY_DIR}/libpid_loop_plugin.so
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# Executables
 
 add_executable(core_loop src/core_loop.cpp)
 
@@ -38,6 +137,7 @@ target_link_libraries(core_loop PRIVATE
   ${lifecycle_msgs_TARGETS}
   rclcpp::rclcpp
   rclcpp_lifecycle::rclcpp_lifecycle
+  rclcpp_components::component
   ${std_msgs_TARGETS}
 )
 
@@ -54,6 +154,7 @@ target_link_libraries(navigation PRIVATE
   ${nav_msgs_TARGETS}
   rclcpp::rclcpp
   rclcpp_lifecycle::rclcpp_lifecycle
+  rclcpp_components::component
   ${std_msgs_TARGETS}
   cv_bridge::cv_bridge
   ${OpenCV_LIBRARIES}
@@ -70,6 +171,7 @@ target_link_libraries(pid_loop PRIVATE
   ${geometry_msgs_TARGETS}
   rclcpp::rclcpp
   rclcpp_lifecycle::rclcpp_lifecycle
+  rclcpp_components::component
   ${std_msgs_TARGETS}
 )
 

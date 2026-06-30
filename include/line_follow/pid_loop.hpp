@@ -29,7 +29,7 @@ using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface
 class PIDLoop : public rclcpp_lifecycle::LifecycleNode
 {
 public:
-  PIDLoop();
+  explicit PIDLoop(const rclcpp::NodeOptions & options);
 
   CallbackReturn on_configure(const rclcpp_lifecycle::State &) override;
   CallbackReturn on_activate(const rclcpp_lifecycle::State &) override;

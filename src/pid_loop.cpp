@@ -22,8 +22,8 @@
 
 using std::placeholders::_1;
 
-PIDLoop::PIDLoop()
-: rclcpp_lifecycle::LifecycleNode("pid_loop")
+PIDLoop::PIDLoop(const rclcpp::NodeOptions & options)
+: rclcpp_lifecycle::LifecycleNode("pid_loop", options)
 {
   this->declare_parameter<double>("kp", 0.1);
   this->declare_parameter<double>("ki", 0.0);
@@ -160,8 +160,11 @@ void PIDLoop::sendManualI2C(int32_t error)
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<PIDLoop>();
+  auto node = std::make_shared<PIDLoop>(rclcpp::NodeOptions());
   rclcpp::spin(node->get_node_base_interface());
   rclcpp::shutdown();
   return 0;
 }
+
+#include "rclcpp_components/register_node_macro.hpp"
+RCLCPP_COMPONENTS_REGISTER_NODE(PIDLoop);
