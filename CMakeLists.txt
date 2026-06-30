@@ -147,6 +147,7 @@ target_include_directories(navigation PRIVATE
   include
   ${OpenCV_INCLUDE_DIRS}
   ${CMAKE_CURRENT_SOURCE_DIR}/extern/hungarian-algorithm-cpp
+  avdevice
 )
 
 target_link_libraries(navigation PRIVATE

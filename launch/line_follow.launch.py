@@ -52,7 +52,7 @@ def generate_launch_description():
         name='line_follow_container',
         namespace='',
         package='rclcpp_components',
-        executable='component_manager',
+        executable='component_container',
         composable_node_descriptions=[core_loop, navigation, pid_loop],
         output='screen',
     )
