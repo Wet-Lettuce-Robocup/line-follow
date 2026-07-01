@@ -58,7 +58,7 @@ CallbackReturn CoreLoop::on_configure(const rclcpp_lifecycle::State &)
   this->navigation_client =
     this->create_client<lifecycle_msgs::srv::ChangeState>("navigation/change_state");
 
-  if (!this->navigation_client->wait_for_service(std::chrono::seconds(5))) {
+  if (!this->navigation_client->wait_for_service(std::chrono::seconds(-1))) {
     RCLCPP_ERROR(this->get_logger(), "Navigation service not available");
     return CallbackReturn::FAILURE;
   }
@@ -66,7 +66,7 @@ CallbackReturn CoreLoop::on_configure(const rclcpp_lifecycle::State &)
   this->pid_loop_client =
     this->create_client<lifecycle_msgs::srv::ChangeState>("pid_loop/change_state");
 
-  if (!this->pid_loop_client->wait_for_service(std::chrono::seconds(5))) {
+  if (!this->pid_loop_client->wait_for_service(std::chrono::seconds(-1))) {
     RCLCPP_ERROR(this->get_logger(), "PID manager service not available");
     return CallbackReturn::FAILURE;
   }

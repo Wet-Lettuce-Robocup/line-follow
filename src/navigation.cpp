@@ -424,8 +424,8 @@ std::vector<cv::Point> NavigationNode::extractGreen(cv::Mat & image)
   cv::Mat hsv;
   cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
 
-  cv::Scalar lower_green(35, 40, 40);
-  cv::Scalar upper_green(85, 255, 255);
+  cv::Scalar lower_green(80, 100, 30);
+  cv::Scalar upper_green(160, 255, 255);
 
   cv::Mat mask;
   cv::inRange(hsv, lower_green, upper_green, mask);
