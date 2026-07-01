@@ -96,10 +96,6 @@ CallbackReturn NavigationNode::on_configure(const rclcpp_lifecycle::State &)
   this->odomSub =
     this->create_subscription<nav_msgs::msg::Odometry>("/odom", 10,
     std::bind(&NavigationNode::odomCallback, this, _1));
-  this->silverSub =
-    this->create_subscription<std_msgs::msg::Bool>("/silver_present", 10,
-    std::bind(&NavigationNode::silverCallback, this, _1));
-
 
   return CallbackReturn::SUCCESS;
 }
@@ -185,16 +181,6 @@ std::vector<std::vector<double>> TrackedGraph::getCostMatrix(Graph & graph)
   }
 
   return costs;
-}
-
-
-void NavigationNode::silverCallback(std_msgs::msg::Bool::SharedPtr msg)
-{
-  this->state = COMPLETE;
-
-  std_msgs::msg::Bool pubMsg = std_msgs::msg::Bool();
-  pubMsg.data = true;
-  this->lineCompletePub->publish(pubMsg);
 }
 
 void NavigationNode::imageCallback(sensor_msgs::msg::Image::SharedPtr msg)

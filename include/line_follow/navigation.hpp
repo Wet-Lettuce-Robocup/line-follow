@@ -125,7 +125,6 @@ public:
 private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr imageSub;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub;
-  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr silverSub;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float64>> errorPub;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Bool>> lineCompletePub;
 
@@ -138,7 +137,6 @@ private:
 
   void imageCallback(sensor_msgs::msg::Image::SharedPtr msg);
   void odomCallback(nav_msgs::msg::Odometry::SharedPtr msg);
-  void silverCallback(std_msgs::msg::Bool::SharedPtr msg);
   double simpleError(const cv::Mat & frame);
   void publishError(double error);
 
