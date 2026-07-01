@@ -273,12 +273,51 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // Prevent division by zero
   if (m.m00 == 0) {return 0.0;}
 
-    // Centroid X coordinate formula: X = M10 / M00
-  double lineCenterX = (m.m10 / m.m00) + x;
+    // Centroid of the largest line contour, in resized-frame coordinates.
+  cv::Point2d lineCentroid(m.m10 / m.m00, m.m01 / m.m00);
 
-    // 6. Calculate the error from the screen center
-  double screenCenterX = thresh.cols / 2.0;
-  double error = lineCenterX - screenCenterX;
+    // --- Green-weighted target point ---
+    // Distance (in resized-frame pixels) within which a detected green
+    // blob is considered close enough to the line's centroid to pull
+    // the target point toward it (e.g. rescue markers, junction markers).
+  const double greenDistThreshold = 150.0;
+    // Relative weighting of a qualifying green centroid versus the
+    // line contour's own centroid when averaging the target point.
+    // >1.0 means green contours are weighted more heavily than the line COM.
+  const double greenWeight = 3.0;
+
+  std::vector<cv::Point> greenCenters = this->extractGreen(resized);
+
+  cv::Point2d weightedSum = lineCentroid;
+  double totalWeight = 1.0;
+
+  for (const cv::Point & greenPoint : greenCenters) {
+    double dist = this->calculateDist(
+      greenPoint, cv::Point(static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)));
+
+    if (dist > greenDistThreshold) {
+      continue;
+    }
+
+    weightedSum += greenWeight * cv::Point2d(greenPoint.x, greenPoint.y);
+    totalWeight += greenWeight;
+  }
+
+  cv::Point2d targetPoint = weightedSum / totalWeight;
+
+    // Undo the crop offset to bring the target point back into full-frame coordinates.
+  targetPoint.x += x;
+  targetPoint.y += y;
+
+    // 6. Stationary reference point: bottom-middle of the (uncropped) frame.
+  cv::Point2d stationaryPoint(frame.cols / 2.0, frame.rows);
+
+  double dx = targetPoint.x - stationaryPoint.x;
+  double dy = stationaryPoint.y - targetPoint.y;  // flip so "straight ahead" is positive dy
+
+    // Error is now the heading angle from the stationary point to the
+    // (green-weighted) target centroid, rather than a raw pixel offset.
+  double error = std::atan2(dx, dy);
 
   cv::Mat processed;
   cv::cvtColor(thresh, processed, cv::COLOR_GRAY2BGR);
