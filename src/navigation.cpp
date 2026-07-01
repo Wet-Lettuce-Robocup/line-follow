@@ -324,11 +324,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   cv::Mat processed;
   cv::cvtColor(thresh, processed, cv::COLOR_GRAY2BGR);
 
-  for (const auto &center : greenCenters) {
+  for (const auto & center : greenCenters) {
     cv::circle(processed, center, 15, cv::Scalar(0, 0, 255), -1);
   }
 
-  this->writer.write(processed);
+  this->writer.write(resized);
 
   return error;
 
