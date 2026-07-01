@@ -124,6 +124,7 @@ void PIDLoop::sendManualI2C(int32_t error)
   }
 
   uint32_t speed = this->defaultSpeed - 0.3 * std::abs(error);
+  if (std::abs(error) > 70) speed = 0;
 
   uint8_t buffer[13];
 
@@ -151,8 +152,6 @@ void PIDLoop::sendManualI2C(int32_t error)
     close(i2c_fd);
     return;
   }
-
-  RCLCPP_INFO(this->get_logger(), "Successfully sent %ld bytes over I2C!", bytes_written);
 
   close(i2c_fd);
 }

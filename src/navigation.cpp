@@ -23,6 +23,7 @@
 #include <opencv2/videoio.hpp>
 #include <opencv2/ximgproc.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/qos.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include "nav_msgs/msg/odometry.hpp"
 #include <lifecycle_msgs/msg/state.hpp>
@@ -70,11 +71,11 @@ NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
     this->navigationType = NavigationType::SIMPLE;
   }
 
-  int fourcc = cv::VideoWriter::fourcc('x', 'v', 'i', 'd');
-  cv::Size frameSize = cv::Size(480, 854);
+  int fourcc = cv::VideoWriter::fourcc('m', 'p', '4', 'v');
+  cv::Size frameSize = cv::Size(854, 480);
   double fps = 30.0;
 
-  this->writer = cv::VideoWriter("/videos/output.avi", cv::CAP_GSTREAMER, fourcc,
+  this->writer = cv::VideoWriter("/videos/output.mp4", fourcc,
     fps,
     frameSize);
 
@@ -88,10 +89,12 @@ NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
 CallbackReturn NavigationNode::on_configure(const rclcpp_lifecycle::State &)
 {
   RCLCPP_INFO(this->get_logger(), "Configuring...");
+  auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort();
+
   this->errorPub = this->create_publisher<std_msgs::msg::Float64>("line_error", 10);
   this->lineCompletePub = this->create_publisher<std_msgs::msg::Bool>("rescue_active", 10);
   this->imageSub =
-    this->create_subscription<sensor_msgs::msg::Image>("/down_camera/camera_node/image_raw", 10,
+    this->create_subscription<sensor_msgs::msg::Image>("/down_camera/camera_node/image_raw", qos,
     std::bind(&NavigationNode::imageCallback, this, _1));
   this->odomSub =
     this->create_subscription<nav_msgs::msg::Odometry>("/odom", 10,
@@ -218,9 +221,8 @@ void NavigationNode::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 
 void NavigationNode::publishError(double error)
 {
-  RCLCPP_INFO(this->get_logger(), "Publishing error: %f", error);
   std_msgs::msg::Float64 msg = std_msgs::msg::Float64();
-  msg.data = error * 1.5;
+  msg.data = error * 3.5;
   this->errorPub->publish(msg);
 }
 
@@ -321,8 +323,6 @@ double NavigationNode::simpleError(const cv::Mat & frame)
 
   cv::Mat processed;
   cv::cvtColor(thresh, processed, cv::COLOR_GRAY2BGR);
-  RCLCPP_INFO(this->get_logger(), "Thresh size: %i x %i, %i channels.", processed.cols,
-    processed.rows, processed.channels());
   this->writer.write(processed);
 
   return error;
@@ -355,7 +355,7 @@ cv::Mat NavigationNode::applyThreshold(cv::Mat & image, uint32_t threshSize, uin
   GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), 0);
 
   cv::adaptiveThreshold(gray, binary, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C,
-                        cv::THRESH_BINARY_INV, threshSize, 10);
+                        cv::THRESH_BINARY_INV, threshSize, 4);
 
   // cv::threshold(gray, binary, 120, 255, cv::THRESH_BINARY_INV);
   // binary = this->applySmoothVariableThreshold(gray);

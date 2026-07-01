@@ -4,8 +4,8 @@
       navigation_type: 'simple'
       use_intra_process_comms: true
       qos_overrides:
-        /camera/image_raw:
-          publisher:
+        /down_camera/camera_node/image_raw:
+          subscription:
             reliability: best_effort
             history: keep_last
             depth: 1
