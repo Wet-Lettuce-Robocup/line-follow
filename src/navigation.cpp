@@ -222,7 +222,7 @@ void NavigationNode::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 void NavigationNode::publishError(double error)
 {
   std_msgs::msg::Float64 msg = std_msgs::msg::Float64();
-  msg.data = error * 3.5;
+  msg.data = error * 350;
   this->errorPub->publish(msg);
 }
 
@@ -286,7 +286,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // Relative weighting of a qualifying green centroid versus the
     // line contour's own centroid when averaging the target point.
     // >1.0 means green contours are weighted more heavily than the line COM.
-  const double greenWeight = 3.0;
+  const double greenWeight = 25.0;
 
   std::vector<cv::Point> greenCenters = this->extractGreen(resized);
 
@@ -323,6 +323,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
 
   cv::Mat processed;
   cv::cvtColor(thresh, processed, cv::COLOR_GRAY2BGR);
+
+  for (const auto &center : greenCenters) {
+    cv::circle(processed, center, 15, cv::Scalar(0, 0, 255), -1);
+  }
+
   this->writer.write(processed);
 
   return error;
@@ -438,7 +443,7 @@ std::vector<cv::Point> NavigationNode::extractGreen(cv::Mat & image)
   for (const auto & contour : contours) {
     double area = cv::contourArea(contour);
 
-    if (area <= 100) {
+    if (area <= 200) {
       continue;
     }
 

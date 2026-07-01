@@ -28,7 +28,7 @@ PIDLoop::PIDLoop(const rclcpp::NodeOptions & options)
   this->declare_parameter<double>("kp", 0.1);
   this->declare_parameter<double>("ki", 0.0);
   this->declare_parameter<double>("kd", 0.0);
-  this->declare_parameter<int>("default_speed", 50);
+  this->declare_parameter<int>("default_speed", 60);
 
   this->kp = this->get_parameter("kp").as_double();
   this->ki = this->get_parameter("ki").as_double();
@@ -123,7 +123,7 @@ void PIDLoop::sendManualI2C(int32_t error)
     return;
   }
 
-  uint32_t speed = this->defaultSpeed - 0.3 * std::abs(error);
+  uint32_t speed = this->defaultSpeed - 0.15 * std::abs(error);
   if (std::abs(error) > 70) speed = 0;
 
   uint8_t buffer[13];
