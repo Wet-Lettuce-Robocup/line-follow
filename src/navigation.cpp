@@ -139,6 +139,7 @@ CallbackReturn NavigationNode::on_cleanup(const rclcpp_lifecycle::State &)
   this->errorPub.reset();
   this->imageSub.reset();
   this->odomSub.reset();
+  timer_->reset();
 
   return CallbackReturn::SUCCESS;
 }
@@ -375,6 +376,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   cv::resize(croppedImg, resized, dsize);
 
   cv::Mat thresh = this->applyThreshold(resized, 255, 35);
+  auto afterThresh = std::chrono::steady_clock::now();
+  RCLCPP_INFO(this->get_logger(), "time after thresh: : %ld",
+      std::chrono::duration_cast<std::chrono::milliseconds>(afterThresh -
+                                                                       start)
+    .count());
     // 3. Find contours
   std::vector<std::vector<cv::Point>> contours;
   cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
@@ -436,11 +442,6 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // >1.0 means green contours are weighted more heavily than the line COM.
   const double greenWeight = 25.0;
 
-  auto beforeGreen = std::chrono::steady_clock::now();
-  RCLCPP_INFO(this->get_logger(), "Total time before green: %ld",
-      std::chrono::duration_cast<std::chrono::milliseconds>(beforeGreen -
-                                                                       start)
-    .count());
   std::vector<std::vector<cv::Point>> greenContours;
   std::vector<cv::Point> greenCenters = this->extractGreen(resized, &greenContours);
 
