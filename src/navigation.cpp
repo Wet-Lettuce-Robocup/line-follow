@@ -38,6 +38,7 @@
 #include <Hungarian.h>
 
 using std::placeholders::_1;
+using std::placeholders::_2;
 using namespace std::chrono_literals;
 
 NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
@@ -177,6 +178,8 @@ void NavigationNode::sendMovementGoal(double vel, double angular_vel, double tim
 
   sendGoalOptions.goal_response_callback =
     std::bind(&NavigationNode::goalResponseCallback, this, _1);
+  sendGoalOptions.feedback_callback = std::bind(&NavigationNode::goalFeedbackCallback, this, _1,
+    _2);
   sendGoalOptions.result_callback =
     std::bind(&NavigationNode::goalResultCallback, this, _1);
 
@@ -192,6 +195,10 @@ void NavigationNode::goalResponseCallback(
     RCLCPP_INFO(this->get_logger(), "Movement goal accepted!");
   }
 }
+
+void goalFeedbackCallback(
+  rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::SharedPtr,
+  const std::shared_ptr<const robot_msgs::action::MoveTime::Feedback> _) {}
 
 void NavigationNode::goalResultCallback(
   const rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::WrappedResult & result)
@@ -423,8 +430,10 @@ double NavigationNode::simpleError(const cv::Mat & frame)
 
     double angle = this->calculateAngle(p1, p2);
     if (std::abs(angle) < 0.5 || std::abs(angle) > std::numbers::pi - 0.5) {
+      RCLCPP_INFO(this->get_logger(), "Starting double green");
       this->sendMovementGoal(0, 100, 5);
       this->state = GREEN_ROTATE;
+      RCLCPP_INFO(this->get_logger(), "Sent double green start message");
       return 0;
     }
   }

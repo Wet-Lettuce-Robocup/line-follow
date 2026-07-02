@@ -147,6 +147,9 @@ private:
   void odomCallback(nav_msgs::msg::Odometry::SharedPtr msg);
   void goalResponseCallback(
     const rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::SharedPtr & goalHandle);
+  void goalFeedbackCallback(
+    rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::SharedPtr,
+    const std::shared_ptr<const robot_msgs::action::MoveTime::Feedback> feedback);
   void goalResultCallback(
     const rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::WrappedResult & result);
   double simpleError(const cv::Mat & frame);
