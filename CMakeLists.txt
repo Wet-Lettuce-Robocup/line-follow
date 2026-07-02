@@ -1,3 +1,4 @@
+
 cmake_minimum_required(VERSION 3.20)
 project(line_follow)
 
@@ -22,6 +23,7 @@ add_library(hungarian-algorithm-cpp STATIC
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
+find_package(rclcpp_action REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -29,6 +31,7 @@ find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(robot_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
 
@@ -44,8 +47,10 @@ target_link_libraries(navigation_plugin PUBLIC
   ${nav_msgs_TARGETS}
   rclcpp::rclcpp
   rclcpp_lifecycle::rclcpp_lifecycle
+  rclcpp_action::rclcpp_action
   rclcpp_components::component
   ${std_msgs_TARGETS}
+  ${robot_msgs_TARGETS}
   cv_bridge::cv_bridge
   ${OpenCV_LIBRARIES}
   hungarian-algorithm-cpp
@@ -159,6 +164,7 @@ target_link_libraries(navigation PRIVATE
   rclcpp_lifecycle::rclcpp_lifecycle
   rclcpp_components::component
   ${std_msgs_TARGETS}
+  ${robot_msgs_TARGETS}
   cv_bridge::cv_bridge
   ${OpenCV_LIBRARIES}
   hungarian-algorithm-cpp

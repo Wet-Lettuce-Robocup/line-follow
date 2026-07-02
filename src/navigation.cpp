@@ -27,6 +27,7 @@
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include "nav_msgs/msg/odometry.hpp"
 #include <lifecycle_msgs/msg/state.hpp>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <unordered_map>
@@ -36,6 +37,7 @@
 #include <Hungarian.h>
 
 using std::placeholders::_1;
+using namespace std::chrono_literals;
 
 NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
 : rclcpp_lifecycle::LifecycleNode("navigation", options)
@@ -61,6 +63,7 @@ NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
     {"advanced", NavigationType::ADVANCED}
   };
 
+  timer_ = this->create_wall_timer(100ms, std::bind(&NavigationNode::timerCallback, this));
 
   auto it = nav_type_map.find(nav_type_str);
 
@@ -155,6 +158,83 @@ TrackedNode::TrackedNode(cv::Point pos)
   this->pos = pos;
 }
 
+void NavigationNode::sendMovementGoal(double vel, double angular_vel, double time)
+{
+  if (!this->actionClient->wait_for_action_server(std::chrono::seconds(10))) {
+    RCLCPP_ERROR(this->get_logger(), "Action server not available.");
+    return;
+  }
+
+  auto goalMsg = robot_msgs::action::MoveTime::Goal();
+  goalMsg.vel = vel;
+  goalMsg.angular_vel = angular_vel;
+  goalMsg.time = time;
+
+  auto sendGoalOptions = rclcpp_action::Client<robot_msgs::action::MoveTime>::SendGoalOptions();
+
+  sendGoalOptions.goal_response_callback =
+    std::bind(&NavigationNode::goalResponseCallback, this, _1);
+  sendGoalOptions.result_callback =
+    std::bind(&NavigationNode::goalResultCallback, this, _1);
+
+  this->actionClient->async_send_goal(goalMsg, sendGoalOptions);
+}
+
+void NavigationNode::goalResponseCallback(
+  const rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::SharedPtr & goalHandle)
+{
+  if (!goalHandle) {
+    RCLCPP_ERROR(this->get_logger(), "Movement goal rejected!");
+  } else {
+    RCLCPP_INFO(this->get_logger(), "Movement goal accepted!");
+  }
+}
+
+void NavigationNode::goalResultCallback(
+  const rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::WrappedResult & result)
+{
+  switch (result.code) {
+    case rclcpp_action::ResultCode::SUCCEEDED:
+      RCLCPP_INFO(this->get_logger(), "Goal succeeded!");
+      break;
+    case rclcpp_action::ResultCode::ABORTED:
+      RCLCPP_ERROR(this->get_logger(), "Goal was aborted");
+      return;
+    case rclcpp_action::ResultCode::CANCELED:
+      RCLCPP_WARN(this->get_logger(), "Goal was canceled");
+      return;
+    default:
+      RCLCPP_ERROR(this->get_logger(), "Unknown result code");
+      return;
+  }
+  switch (this->state) {
+    case FOLLOWING:
+      break;
+    case TOWER_ROTATE_START:
+      this->sendMovementGoal(100, 100, 10);
+      this->state = TOWER_MOVE;
+      break;
+    case TOWER_MOVE:
+      this->sendMovementGoal(100, 100, 10);
+      this->state = TOWER_ROTATE_END;
+      break;
+    case TOWER_ROTATE_END:
+      this->sendMovementGoal(100, 100, 10);
+      this->state = FOLLOWING;
+      break;
+    case GREEN_ROTATE:
+      this->sendMovementGoal(0, 100, 5);
+      this->state = GREEN_MOVE_FORWARD;
+      break;
+    case GREEN_MOVE_FORWARD:
+      this->sendMovementGoal(100, 0, 5);
+      this->state = FOLLOWING;
+      break;
+    case COMPLETE:
+      break;
+  }
+}
+
 std::vector<std::vector<double>> TrackedGraph::getCostMatrix(Graph & graph)
 {
   // TODO apply kalman filter
@@ -202,12 +282,34 @@ void NavigationNode::imageCallback(sensor_msgs::msg::Image::SharedPtr msg)
 
   cv::Mat frame = cv_ptr->image;
 
-  switch (this->navigationType) {
-    case NavigationType::SIMPLE:
-      this->simpleNavigation(frame);
+  this->currentFrame = frame;
+}
+
+void NavigationNode::timerCallback()
+{
+  switch (this->state) {
+    case FOLLOWING:
+      switch (this->navigationType) {
+        case NavigationType::SIMPLE:
+          this->simpleNavigation(this->currentFrame);
+          break;
+        case NavigationType::ADVANCED:
+          this->advancedNavigation(this->currentFrame);
+          break;
+      }
+
       break;
-    case NavigationType::ADVANCED:
-      this->advancedNavigation(frame);
+    case TOWER_ROTATE_START:
+      break;
+    case TOWER_MOVE:
+      break;
+    case TOWER_ROTATE_END:
+      break;
+    case GREEN_ROTATE:
+      break;
+    case GREEN_MOVE_FORWARD:
+      break;
+    case COMPLETE:
       break;
   }
 }
@@ -424,8 +526,8 @@ std::vector<cv::Point> NavigationNode::extractGreen(cv::Mat & image)
   cv::Mat hsv;
   cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
 
-  cv::Scalar lower_green(80, 100, 30);
-  cv::Scalar upper_green(160, 255, 255);
+  cv::Scalar lower_green(40, 40, 30);
+  cv::Scalar upper_green(100, 255, 255);
 
   cv::Mat mask;
   cv::inRange(hsv, lower_green, upper_green, mask);
