@@ -242,7 +242,7 @@ void NavigationNode::goalResultCallback(
       this->state = FOLLOWING;
       break;
     case GREEN_ROTATE:
-      this->sendMovementGoal(100, 0, 5);
+      this->sendMovementGoal(100, 0, 0.2);
       this->state = GREEN_MOVE_FORWARD;
       break;
     case GREEN_MOVE_FORWARD:
@@ -309,8 +309,6 @@ void NavigationNode::timerCallback()
     case FOLLOWING: {
         if (this->currentFrame.empty()) {return;}
 
-        auto start = std::chrono::steady_clock::now();
-
         switch (this->navigationType) {
           case NavigationType::SIMPLE:
             this->simpleNavigation(this->currentFrame);
@@ -319,12 +317,6 @@ void NavigationNode::timerCallback()
             this->advancedNavigation(this->currentFrame);
             break;
         }
-
-        auto end = std::chrono::steady_clock::now();
-        RCLCPP_INFO(this->get_logger(), "Time taken: %ld",
-      std::chrono::duration_cast<std::chrono::milliseconds>(end -
-                                                                       start)
-          .count());
 
         break;
       }
@@ -359,7 +351,6 @@ void NavigationNode::publishError(double error)
 
 double NavigationNode::simpleError(const cv::Mat & frame)
 {
-  auto start = std::chrono::steady_clock::now();
   int newWidth = static_cast<int>(frame.cols * 0.8);
   int newHeight = static_cast<int>(frame.rows * 0.6);
 
@@ -376,11 +367,6 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   cv::resize(croppedImg, resized, dsize);
 
   cv::Mat thresh = this->applyThreshold(resized, 255, 35);
-  auto afterThresh = std::chrono::steady_clock::now();
-  RCLCPP_INFO(this->get_logger(), "time after thresh: : %ld",
-      std::chrono::duration_cast<std::chrono::milliseconds>(afterThresh -
-                                                                       start)
-    .count());
     // 3. Find contours
   std::vector<std::vector<cv::Point>> contours;
   cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
@@ -455,7 +441,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     double angle = this->calculateAngle(p1, p2);
     if (std::abs(angle) < 0.5 || std::abs(angle) > std::numbers::pi - 0.5) {
       RCLCPP_INFO(this->get_logger(), "Starting double green");
-      this->sendMovementGoal(0, 100, 5);
+      this->sendMovementGoal(0, 100, 3.3);
       this->state = GREEN_ROTATE;
       RCLCPP_INFO(this->get_logger(), "Sent double green start message");
       return 0;
@@ -513,14 +499,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
 
   this->writer.write(processed);
 
-  auto end = std::chrono::steady_clock::now();
-  RCLCPP_INFO(this->get_logger(), "Total error time: %ld",
-      std::chrono::duration_cast<std::chrono::milliseconds>(end -
-                                                                       start)
-    .count());
-
   return error;
-
 }
 
 void NavigationNode::simpleNavigation(cv::Mat & frame)
@@ -548,10 +527,10 @@ cv::Mat NavigationNode::applyThreshold(cv::Mat & image, uint32_t threshSize, uin
   cvtColor(image, gray, cv::COLOR_BGR2GRAY);
   GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), 0);
 
-  cv::adaptiveThreshold(gray, binary, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C,
-                        cv::THRESH_BINARY_INV, threshSize, 4);
+  // cv::adaptiveThreshold(gray, binary, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C,
+  //                       cv::THRESH_BINARY_INV, threshSize, 4);
 
-  // cv::threshold(gray, binary, 120, 255, cv::THRESH_BINARY_INV);
+  cv::threshold(gray, binary, 120, 255, cv::THRESH_BINARY_INV);
   // binary = this->applySmoothVariableThreshold(gray);
 
   cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(kernelSize, kernelSize));
