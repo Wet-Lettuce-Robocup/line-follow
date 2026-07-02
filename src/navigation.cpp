@@ -196,7 +196,7 @@ void NavigationNode::goalResponseCallback(
   }
 }
 
-void goalFeedbackCallback(
+void NavigationNode::goalFeedbackCallback(
   rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::SharedPtr,
   const std::shared_ptr<const robot_msgs::action::MoveTime::Feedback> _) {}
 
