@@ -112,6 +112,8 @@ CallbackReturn NavigationNode::on_activate(const rclcpp_lifecycle::State & state
   this->errorPub->on_activate();
   this->lineCompletePub->on_activate();
 
+  this->state = FOLLOWING;
+
   return rclcpp_lifecycle::LifecycleNode::on_activate(state);
 }
 
