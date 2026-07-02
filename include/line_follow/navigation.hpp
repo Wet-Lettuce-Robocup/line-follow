@@ -159,7 +159,9 @@ private:
   cv::Mat applyThreshold(cv::Mat & image, uint32_t threshSize, uint32_t kernelSize);
   cv::Point localToGlobalFrame(cv::Point point);
 
-  std::vector<cv::Point> extractGreen(cv::Mat & image);
+  std::vector<cv::Point> extractGreen(
+    cv::Mat & image,
+    std::vector<std::vector<cv::Point>> * greenContours);
   void extractNodes();
   void extractEdges();
 
