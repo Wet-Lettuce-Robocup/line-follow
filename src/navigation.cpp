@@ -238,11 +238,10 @@ void NavigationNode::goalResultCallback(
       this->state = FOLLOWING;
       break;
     case GREEN_ROTATE:
-      this->sendMovementGoal(0, 100, 5);
+      this->sendMovementGoal(100, 0, 5);
       this->state = GREEN_MOVE_FORWARD;
       break;
     case GREEN_MOVE_FORWARD:
-      this->sendMovementGoal(100, 0, 5);
       this->state = FOLLOWING;
       break;
     case COMPLETE:
