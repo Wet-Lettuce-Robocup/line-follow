@@ -292,6 +292,7 @@ void NavigationNode::timerCallback()
 {
   switch (this->state) {
     case FOLLOWING:
+      if (this->currentFrame.empty()) {return;}
       switch (this->navigationType) {
         case NavigationType::SIMPLE:
           this->simpleNavigation(this->currentFrame);
