@@ -34,6 +34,7 @@
 #include <cv_bridge/cv_bridge.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <numbers>
+#include <vector>
 #include <Hungarian.h>
 
 using std::placeholders::_1;
@@ -413,6 +414,18 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // --- Draw green contours in green ---
   cv::drawContours(processed, greenContours, -1, cv::Scalar(0, 255, 0), 2);
 
+  if (greenCenters.size() >= 2) {
+    cv::Point p1 = greenCenters[0];
+    cv::Point p2 = greenCenters[1];
+
+    double angle = this->calculateAngle(p1, p2);
+    if (std::abs(angle) < 0.5 || std::abs(angle) > std::numbers::pi - 0.5) {
+      this->sendMovementGoal(0, 100, 5);
+      this->state = GREEN_ROTATE;
+      return 0;
+    }
+  }
+
   cv::Point2d weightedSum = lineCentroid;
   double totalWeight = 1.0;
 
@@ -575,6 +588,11 @@ std::vector<cv::Point> NavigationNode::extractGreen(
                    cv::CHAIN_APPROX_SIMPLE);
 
   std::vector<cv::Point> centers;
+
+  std::sort(contours.begin(), contours.end(),
+    [](const std::vector<cv::Point> & a, const std::vector<cv::Point> & b) {
+      return cv::contourArea(a) > cv::contourArea(b);
+    });
 
   for (const auto & contour : contours) {
     double area = cv::contourArea(contour);
@@ -1500,4 +1518,3 @@ int main(int argc, char ** argv)
 
 #include "rclcpp_components/register_node_macro.hpp"
 RCLCPP_COMPONENTS_REGISTER_NODE(NavigationNode);
-

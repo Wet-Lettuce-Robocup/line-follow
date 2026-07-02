@@ -162,6 +162,7 @@ target_link_libraries(navigation PRIVATE
   ${nav_msgs_TARGETS}
   rclcpp::rclcpp
   rclcpp_lifecycle::rclcpp_lifecycle
+  rclcpp_action::rclcpp_action
   rclcpp_components::component
   ${std_msgs_TARGETS}
   ${robot_msgs_TARGETS}
