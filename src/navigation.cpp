@@ -302,18 +302,28 @@ void NavigationNode::imageCallback(sensor_msgs::msg::Image::SharedPtr msg)
 void NavigationNode::timerCallback()
 {
   switch (this->state) {
-    case FOLLOWING:
-      if (this->currentFrame.empty()) {return;}
-      switch (this->navigationType) {
-        case NavigationType::SIMPLE:
-          this->simpleNavigation(this->currentFrame);
-          break;
-        case NavigationType::ADVANCED:
-          this->advancedNavigation(this->currentFrame);
-          break;
-      }
+    case FOLLOWING: {
+        if (this->currentFrame.empty()) {return;}
 
-      break;
+        auto start = std::chrono::steady_clock::now();
+
+        switch (this->navigationType) {
+          case NavigationType::SIMPLE:
+            this->simpleNavigation(this->currentFrame);
+            break;
+          case NavigationType::ADVANCED:
+            this->advancedNavigation(this->currentFrame);
+            break;
+        }
+
+        auto end = std::chrono::steady_clock::now();
+        RCLCPP_INFO(this->get_logger(), "Time taken: %ld",
+      std::chrono::duration_cast<std::chrono::milliseconds>(end -
+                                                                       start)
+          .count());
+
+        break;
+      }
     case TOWER_ROTATE_START:
       break;
     case TOWER_MOVE:
@@ -432,14 +442,14 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     cv::Point p1 = greenCenters[0];
     cv::Point p2 = greenCenters[1];
 
-    // double angle = this->calculateAngle(p1, p2);
-    // if (std::abs(angle) < 0.5 || std::abs(angle) > std::numbers::pi - 0.5) {
-    //   RCLCPP_INFO(this->get_logger(), "Starting double green");
-    //   this->sendMovementGoal(0, 100, 5);
-    //   this->state = GREEN_ROTATE;
-    //   RCLCPP_INFO(this->get_logger(), "Sent double green start message");
-    //   return 0;
-    // }
+    double angle = this->calculateAngle(p1, p2);
+    if (std::abs(angle) < 0.5 || std::abs(angle) > std::numbers::pi - 0.5) {
+      RCLCPP_INFO(this->get_logger(), "Starting double green");
+      this->sendMovementGoal(0, 100, 5);
+      this->state = GREEN_ROTATE;
+      RCLCPP_INFO(this->get_logger(), "Sent double green start message");
+      return 0;
+    }
   }
 
   cv::Point2d weightedSum = lineCentroid;
