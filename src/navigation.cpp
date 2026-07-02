@@ -26,6 +26,7 @@
 #include <rclcpp/qos.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include "nav_msgs/msg/odometry.hpp"
+#include "robot_msgs/action/move_time.hpp"
 #include <lifecycle_msgs/msg/state.hpp>
 #include <chrono>
 #include <cstdint>
@@ -66,6 +67,10 @@ NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
   };
 
   timer_ = this->create_wall_timer(33ms, std::bind(&NavigationNode::timerCallback, this));
+  this->actionClient = rclcpp_action::create_client<robot_msgs::action::MoveTime>(
+      this,
+      "/move_time" // Must match the server's action name
+  );
 
   auto it = nav_type_map.find(nav_type_str);
 
