@@ -350,8 +350,14 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   std::vector<std::vector<cv::Point>> contours;
   cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
+    // Annotated frame that gets written to the output video. Built on top of
+    // the color resized image (not the binary threshold mask) so contours,
+    // COM markers, and green blobs are all visible in color.
+  cv::Mat processed = resized.clone();
+
     // If no contours are found, return 0 error
   if (contours.empty()) {
+    this->writer.write(processed);
     return 0.0;
   }
 
@@ -366,8 +372,16 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     }
   }
 
+    // --- Draw all detected line contours in black ---
+    // Every contour thin, the one we believe is the actual line drawn
+    // thicker so it stands out.
+  cv::drawContours(processed, contours, -1, cv::Scalar(0, 0, 0), 1);
+  cv::drawContours(processed, contours, static_cast<int>(largestContourIdx),
+    cv::Scalar(0, 0, 0), 3);
+
     // Optional: Filter out tiny noise
   if (maxArea < 100.0) {
+    this->writer.write(processed);
     return 0.0;
   }
 
@@ -375,7 +389,10 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   cv::Moments m = cv::moments(contours[largestContourIdx]);
 
     // Prevent division by zero
-  if (m.m00 == 0) {return 0.0;}
+  if (m.m00 == 0) {
+    this->writer.write(processed);
+    return 0.0;
+  }
 
     // Centroid of the largest line contour, in resized-frame coordinates.
   cv::Point2d lineCentroid(m.m10 / m.m00, m.m01 / m.m00);
@@ -390,7 +407,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // >1.0 means green contours are weighted more heavily than the line COM.
   const double greenWeight = 25.0;
 
-  std::vector<cv::Point> greenCenters = this->extractGreen(resized);
+  std::vector<std::vector<cv::Point>> greenContours;
+  std::vector<cv::Point> greenCenters = this->extractGreen(resized, &greenContours);
+
+    // --- Draw green contours in green ---
+  cv::drawContours(processed, greenContours, -1, cv::Scalar(0, 255, 0), 2);
 
   cv::Point2d weightedSum = lineCentroid;
   double totalWeight = 1.0;
@@ -398,6 +419,13 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   for (const cv::Point & greenPoint : greenCenters) {
     double dist = this->calculateDist(
       greenPoint, cv::Point(static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)));
+
+      // Mark each green blob centre: yellow if it contributed to the
+      // weighted target point, red if it was too far away and ignored.
+    cv::Scalar markerColor = (dist <= greenDistThreshold) ?
+      cv::Scalar(0, 255, 255) :
+      cv::Scalar(0, 0, 255);
+    cv::circle(processed, greenPoint, 6, markerColor, -1);
 
     if (dist > greenDistThreshold) {
       continue;
@@ -408,6 +436,17 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   }
 
   cv::Point2d targetPoint = weightedSum / totalWeight;
+
+    // --- COM annotations (resized-frame coordinates) ---
+    // Raw line centroid, before green-weighting: magenta.
+  cv::circle(processed, cv::Point(
+      static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)),
+    8, cv::Scalar(255, 0, 255), -1);
+
+    // Final green-weighted target point: cyan circle + crosshair.
+  cv::Point targetPx(static_cast<int>(targetPoint.x), static_cast<int>(targetPoint.y));
+  cv::circle(processed, targetPx, 10, cv::Scalar(255, 255, 0), 2);
+  cv::drawMarker(processed, targetPx, cv::Scalar(255, 255, 0), cv::MARKER_CROSS, 20, 2);
 
     // Undo the crop offset to bring the target point back into full-frame coordinates.
   targetPoint.x += x;
@@ -423,14 +462,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // (green-weighted) target centroid, rather than a raw pixel offset.
   double error = std::atan2(dx, dy);
 
-  cv::Mat processed;
-  cv::cvtColor(thresh, processed, cv::COLOR_GRAY2BGR);
-
-  for (const auto & center : greenCenters) {
-    cv::circle(processed, center, 15, cv::Scalar(0, 0, 255), -1);
-  }
-
-  this->writer.write(resized);
+  this->writer.write(processed);
 
   return error;
 
@@ -521,7 +553,9 @@ cv::Point NavigationNode::localToGlobalFrame(cv::Point point)
   return newCenter + cv::Point(rotatedX, rotatedY);
 }
 
-std::vector<cv::Point> NavigationNode::extractGreen(cv::Mat & image)
+std::vector<cv::Point> NavigationNode::extractGreen(
+  cv::Mat & image,
+  std::vector<std::vector<cv::Point>> * outContours)
 {
   cv::Mat hsv;
   cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
@@ -559,6 +593,10 @@ std::vector<cv::Point> NavigationNode::extractGreen(cv::Mat & image)
     int cY = static_cast<int>(m.m01 / m.m00);
 
     centers.push_back(cv::Point(cX, cY));
+
+    if (outContours) {
+      outContours->push_back(contour);
+    }
   }
 
   return centers;
