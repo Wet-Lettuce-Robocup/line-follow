@@ -444,7 +444,6 @@ std::vector<cv::Point> NavigationNode::extractGreen(cv::Mat & image)
     double area = cv::contourArea(contour);
 
     cv::Mat contourMask = cv::Mat::zeros(mask.size(), CV_8UC1);
-    cv::drawContours(contourMask, contours, static_cast<int>(idx), cv::Scalar(255), cv::FILLED);
     int pixelCount = cv::countNonZero(contourMask);
 
     if (pixelCount <= 100000) {
