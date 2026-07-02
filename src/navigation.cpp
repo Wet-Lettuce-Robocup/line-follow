@@ -355,6 +355,7 @@ void NavigationNode::publishError(double error)
 
 double NavigationNode::simpleError(const cv::Mat & frame)
 {
+  auto start = std::chrono::steady_clock::now();
   int newWidth = static_cast<int>(frame.cols * 0.8);
   int newHeight = static_cast<int>(frame.rows * 0.6);
 
@@ -432,6 +433,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // >1.0 means green contours are weighted more heavily than the line COM.
   const double greenWeight = 25.0;
 
+  auto beforeGreen = std::chrono::steady_clock::now();
+  RCLCPP_INFO(this->get_logger(), "Total time before green: %ld",
+      std::chrono::duration_cast<std::chrono::milliseconds>(beforeGreen -
+                                                                       start)
+    .count());
   std::vector<std::vector<cv::Point>> greenContours;
   std::vector<cv::Point> greenCenters = this->extractGreen(resized, &greenContours);
 
@@ -502,6 +508,12 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   double error = std::atan2(dx, dy);
 
   this->writer.write(processed);
+
+  auto end = std::chrono::steady_clock::now();
+  RCLCPP_INFO(this->get_logger(), "Total error time: %ld",
+      std::chrono::duration_cast<std::chrono::milliseconds>(end -
+                                                                       start)
+    .count());
 
   return error;
 
