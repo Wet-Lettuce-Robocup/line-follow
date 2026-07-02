@@ -231,9 +231,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   int newWidth = static_cast<int>(frame.cols * 0.8);
   int newHeight = static_cast<int>(frame.rows * 0.6);
 
+    // 2. Calculate coordinates to center the crop box
   int x = (frame.cols - newWidth) / 2;
   int y = (frame.rows - newHeight) / 2;
 
+    // 3. Define the Region of Interest (ROI) and crop
   cv::Rect roi(x, y, newWidth, newHeight);
   cv::Mat croppedImg = frame(roi);
 
@@ -242,18 +244,22 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   cv::resize(croppedImg, resized, dsize);
 
   cv::Mat thresh = this->applyThreshold(resized, 255, 35);
-
+    // 3. Find contours
   std::vector<std::vector<cv::Point>> contours;
   cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-  // Base annotated frame — start from the color resized image, not the binary mask.
+    // Annotated frame that gets written to the output video. Built on top of
+    // the color resized image (not the binary threshold mask) so contours,
+    // COM markers, and green blobs are all visible in color.
   cv::Mat processed = resized.clone();
 
+    // If no contours are found, return 0 error
   if (contours.empty()) {
     this->writer.write(processed);
     return 0.0;
   }
 
+    // 4. Find the largest contour (assuming this is our line)
   size_t largestContourIdx = 0;
   double maxArea = 0.0;
   for (size_t i = 0; i < contours.size(); ++i) {
@@ -264,32 +270,45 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     }
   }
 
-  // Draw ALL line contours in black (thin), largest one highlighted thicker.
+    // --- Draw all detected line contours in black ---
+    // Every contour thin, the one we believe is the actual line drawn
+    // thicker so it stands out.
   cv::drawContours(processed, contours, -1, cv::Scalar(0, 0, 0), 1);
   cv::drawContours(processed, contours, static_cast<int>(largestContourIdx),
     cv::Scalar(0, 0, 0), 3);
 
+    // Optional: Filter out tiny noise
   if (maxArea < 100.0) {
     this->writer.write(processed);
     return 0.0;
   }
 
+    // 5. Calculate the Center of Mass (Centroid) using Moments
   cv::Moments m = cv::moments(contours[largestContourIdx]);
 
+    // Prevent division by zero
   if (m.m00 == 0) {
     this->writer.write(processed);
     return 0.0;
   }
 
+    // Centroid of the largest line contour, in resized-frame coordinates.
   cv::Point2d lineCentroid(m.m10 / m.m00, m.m01 / m.m00);
 
+    // --- Green-weighted target point ---
+    // Distance (in resized-frame pixels) within which a detected green
+    // blob is considered close enough to the line's centroid to pull
+    // the target point toward it (e.g. rescue markers, junction markers).
   const double greenDistThreshold = 150.0;
+    // Relative weighting of a qualifying green centroid versus the
+    // line contour's own centroid when averaging the target point.
+    // >1.0 means green contours are weighted more heavily than the line COM.
   const double greenWeight = 25.0;
 
   std::vector<std::vector<cv::Point>> greenContours;
   std::vector<cv::Point> greenCenters = this->extractGreen(resized, &greenContours);
 
-  // Draw green contours in green.
+    // --- Draw green contours in green ---
   cv::drawContours(processed, greenContours, -1, cv::Scalar(0, 255, 0), 2);
 
   cv::Point2d weightedSum = lineCentroid;
@@ -299,10 +318,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     double dist = this->calculateDist(
       greenPoint, cv::Point(static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)));
 
-    // Mark green centers used vs ignored differently.
+      // Mark each green blob centre: yellow if it contributed to the
+      // weighted target point, red if it was too far away and ignored.
     cv::Scalar markerColor = (dist <= greenDistThreshold) ?
-      cv::Scalar(0, 255, 255) :  // yellow: used
-      cv::Scalar(0, 0, 255);     // red: ignored (too far)
+      cv::Scalar(0, 255, 255) :
+      cv::Scalar(0, 0, 255);
     cv::circle(processed, greenPoint, 6, markerColor, -1);
 
     if (dist > greenDistThreshold) {
@@ -315,30 +335,42 @@ double NavigationNode::simpleError(const cv::Mat & frame)
 
   cv::Point2d targetPoint = weightedSum / totalWeight;
 
-  // --- COM annotations (in resized-frame coords, before undoing crop offset) ---
-  // Raw line centroid: magenta.
+    // --- COM annotations (resized-frame coordinates) ---
+    // Raw line centroid, before green-weighting: magenta.
   cv::circle(processed, cv::Point(
       static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)),
     8, cv::Scalar(255, 0, 255), -1);
 
-  // Final green-weighted target point: cyan, with crosshair for visibility.
+    // Final green-weighted target point: cyan circle + crosshair.
   cv::Point targetPx(static_cast<int>(targetPoint.x), static_cast<int>(targetPoint.y));
   cv::circle(processed, targetPx, 10, cv::Scalar(255, 255, 0), 2);
   cv::drawMarker(processed, targetPx, cv::Scalar(255, 255, 0), cv::MARKER_CROSS, 20, 2);
 
+    // Undo the crop offset to bring the target point back into full-frame coordinates.
   targetPoint.x += x;
   targetPoint.y += y;
 
+    // 6. Stationary reference point: bottom-middle of the (uncropped) frame.
   cv::Point2d stationaryPoint(frame.cols / 2.0, frame.rows);
 
   double dx = targetPoint.x - stationaryPoint.x;
-  double dy = stationaryPoint.y - targetPoint.y;
+  double dy = stationaryPoint.y - targetPoint.y;  // flip so "straight ahead" is positive dy
 
+    // Error is now the heading angle from the stationary point to the
+    // (green-weighted) target centroid, rather than a raw pixel offset.
   double error = std::atan2(dx, dy);
 
   this->writer.write(processed);
 
   return error;
+
+}
+
+void NavigationNode::simpleNavigation(cv::Mat & frame)
+{
+  double error = this->simpleError(frame);
+
+  this->publishError(2 * error);
 }
 
 void NavigationNode::advancedNavigation(cv::Mat & frame)
