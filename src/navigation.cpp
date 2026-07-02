@@ -66,12 +66,6 @@ NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
     {"advanced", NavigationType::ADVANCED}
   };
 
-  timer_ = this->create_wall_timer(33ms, std::bind(&NavigationNode::timerCallback, this));
-  this->actionClient = rclcpp_action::create_client<robot_msgs::action::MoveTime>(
-      this,
-      "/move_time" // Must match the server's action name
-  );
-
   auto it = nav_type_map.find(nav_type_str);
 
   if (it != nav_type_map.end()) {
@@ -110,6 +104,13 @@ CallbackReturn NavigationNode::on_configure(const rclcpp_lifecycle::State &)
     this->create_subscription<nav_msgs::msg::Odometry>("/odom", 10,
     std::bind(&NavigationNode::odomCallback, this, _1));
 
+  timer_ = this->create_wall_timer(33ms, std::bind(&NavigationNode::timerCallback, this));
+  timer_->cancel();
+  this->actionClient = rclcpp_action::create_client<robot_msgs::action::MoveTime>(
+      this,
+      "/move_time" // Must match the server's action name
+  );
+
   return CallbackReturn::SUCCESS;
 }
 
@@ -117,6 +118,7 @@ CallbackReturn NavigationNode::on_activate(const rclcpp_lifecycle::State & state
 {
   this->errorPub->on_activate();
   this->lineCompletePub->on_activate();
+  timer_->reset();
 
   this->state = FOLLOWING;
 
@@ -127,6 +129,7 @@ CallbackReturn NavigationNode::on_deactivate(const rclcpp_lifecycle::State & sta
 {
   this->errorPub->on_deactivate();
   this->lineCompletePub->on_deactivate();
+  timer_->cancel();
 
   return rclcpp_lifecycle::LifecycleNode::on_deactivate(state);
 }
