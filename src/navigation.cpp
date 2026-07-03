@@ -508,7 +508,7 @@ void NavigationNode::simpleNavigation(cv::Mat & frame)
 {
   double error = this->simpleError(frame);
 
-  this->publishError(0.05 * error);
+  this->publishError(0.01 * error);
 }
 
 void NavigationNode::advancedNavigation(cv::Mat & frame)
