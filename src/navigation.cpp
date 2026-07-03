@@ -374,11 +374,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // Annotated frame that gets written to the output video. Built on top of
     // the color resized image (not the binary threshold mask) so contours,
     // COM markers, and green blobs are all visible in color.
-  cv::Mat processed = resized.clone();
+    // cv::Mat processed = resized.clone();
 
     // If no contours are found, return 0 error
   if (contours.empty()) {
-    this->writer.write(processed);
+    // this->writer.write(processed);
     return 0.0;
   }
 
@@ -396,13 +396,13 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // --- Draw all detected line contours in black ---
     // Every contour thin, the one we believe is the actual line drawn
     // thicker so it stands out.
-  cv::drawContours(processed, contours, -1, cv::Scalar(0, 0, 0), 1);
-  cv::drawContours(processed, contours, static_cast<int>(largestContourIdx),
-    cv::Scalar(0, 0, 0), 3);
+    // cv::drawContours(processed, contours, -1, cv::Scalar(0, 0, 0), 1);
+    // cv::drawContours(processed, contours, static_cast<int>(largestContourIdx),
+    //   cv::Scalar(0, 0, 0), 3);
 
     // Optional: Filter out tiny noise
   if (maxArea < 100.0) {
-    this->writer.write(processed);
+    // this->writer.write(processed);
     return 0.0;
   }
 
@@ -411,7 +411,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
 
     // Prevent division by zero
   if (m.m00 == 0) {
-    this->writer.write(processed);
+    // this->writer.write(processed);
     return 0.0;
   }
 
@@ -432,7 +432,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   std::vector<cv::Point> greenCenters = this->extractGreen(resized, &greenContours);
 
     // --- Draw green contours in green ---
-  cv::drawContours(processed, greenContours, -1, cv::Scalar(0, 255, 0), 2);
+    // cv::drawContours(processed, greenContours, -1, cv::Scalar(0, 255, 0), 2);
 
   if (greenCenters.size() >= 2) {
     cv::Point p1 = greenCenters[0];
@@ -456,11 +456,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
       greenPoint, cv::Point(static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)));
 
       // Mark each green blob centre: yellow if it contributed to the
-      // weighted target point, red if it was too far away and ignored.
-    cv::Scalar markerColor = (dist <= greenDistThreshold) ?
-      cv::Scalar(0, 255, 255) :
-      cv::Scalar(0, 0, 255);
-    cv::circle(processed, greenPoint, 6, markerColor, -1);
+      //   weighted target point, red if it was too far away and ignored.
+      // cv::Scalar markerColor = (dist <= greenDistThreshold) ?
+      //   cv::Scalar(0, 255, 255) :
+      //   cv::Scalar(0, 0, 255);
+      // cv::circle(processed, greenPoint, 6, markerColor, -1);
 
     if (dist > greenDistThreshold) {
       continue;
@@ -474,14 +474,14 @@ double NavigationNode::simpleError(const cv::Mat & frame)
 
     // --- COM annotations (resized-frame coordinates) ---
     // Raw line centroid, before green-weighting: magenta.
-  cv::circle(processed, cv::Point(
-      static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)),
-    8, cv::Scalar(255, 0, 255), -1);
+    // cv::circle(processed, cv::Point(
+    //     static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)),
+    //   8, cv::Scalar(255, 0, 255), -1);
 
     // Final green-weighted target point: cyan circle + crosshair.
   cv::Point targetPx(static_cast<int>(targetPoint.x), static_cast<int>(targetPoint.y));
-  cv::circle(processed, targetPx, 10, cv::Scalar(255, 255, 0), 2);
-  cv::drawMarker(processed, targetPx, cv::Scalar(255, 255, 0), cv::MARKER_CROSS, 20, 2);
+  // cv::circle(processed, targetPx, 10, cv::Scalar(255, 255, 0), 2);
+  // cv::drawMarker(processed, targetPx, cv::Scalar(255, 255, 0), cv::MARKER_CROSS, 20, 2);
 
     // Undo the crop offset to bring the target point back into full-frame coordinates.
   targetPoint.x += x;
@@ -499,7 +499,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   double length = std::sqrt(dx * dx + dy * dy);
   error *= length;
 
-  this->writer.write(processed);
+  // this->writer.write(processed);
 
   return error;
 }
@@ -513,7 +513,7 @@ void NavigationNode::simpleNavigation(cv::Mat & frame)
 
 void NavigationNode::advancedNavigation(cv::Mat & frame)
 {
-  cv::Mat processed = this->processImage(frame);\
+  cv::Mat processed = this->processImage(frame); \
   this->skeletonizedImage = processed;
   this->extractNodes();
   this->extractEdges();
