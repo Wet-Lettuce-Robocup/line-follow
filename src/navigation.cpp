@@ -448,7 +448,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     }
   }
 
-  cv::Point2d weightedSum = lineCentroid;
+  cv::Point2d greenSum = cv::Point2d();
   double totalWeight = 1.0;
 
   for (const cv::Point & greenPoint : greenCenters) {
@@ -466,11 +466,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
       continue;
     }
 
-    weightedSum += greenWeight * cv::Point2d(greenPoint.x, greenPoint.y);
+    greenSum += greenWeight * (cv::Point2d(greenPoint.x, greenPoint.y) - lineCentroid);
     totalWeight += greenWeight;
   }
 
-  cv::Point2d targetPoint = weightedSum / totalWeight;
+  cv::Point2d targetPoint = lineCentroid + greenSum / totalWeight;
 
     // --- COM annotations (resized-frame coordinates) ---
     // Raw line centroid, before green-weighting: magenta.
@@ -496,7 +496,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // Error is now the heading angle from the stationary point to the
     // (green-weighted) target centroid, rather than a raw pixel offset.
   double error = std::atan2(dx, dy);
-  double length = std::sqrt(dx*dx + dy*dy);
+  double length = std::sqrt(dx * dx + dy * dy);
   error *= length;
 
   this->writer.write(processed);
