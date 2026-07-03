@@ -426,7 +426,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     // Relative weighting of a qualifying green centroid versus the
     // line contour's own centroid when averaging the target point.
     // >1.0 means green contours are weighted more heavily than the line COM.
-  const double greenWeight = 15.0;
+  const double greenWeight = 25.0;
 
   std::vector<std::vector<cv::Point>> greenContours;
   std::vector<cv::Point> greenCenters = this->extractGreen(resized, &greenContours);
