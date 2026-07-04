@@ -1052,7 +1052,7 @@ void NavigationNode::simpleNavigation(cv::Mat & frame)
 
 void NavigationNode::advancedNavigation(cv::Mat & frame)
 {
-  cv::Mat processed = this->processImage(frame);\
+  cv::Mat processed = this->processImage(frame); \
   this->skeletonizedImage = processed;
   this->extractNodes();
   this->extractEdges();
@@ -1126,60 +1126,6 @@ cv::Point NavigationNode::localToGlobalFrame(cv::Point point)
 
   cv::Point newCenter = cv::Point2f(this->x, this->y) / this->pixelSize;
   return newCenter + cv::Point(rotatedX, rotatedY);
-}
-
-std::vector<cv::Point> NavigationNode::extractGreen(
-  cv::Mat & image,
-  std::vector<std::vector<cv::Point>> * outContours)
-{
-  cv::Mat hsv;
-  cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
-
-  cv::Scalar lower_green(40, 40, 30);
-  cv::Scalar upper_green(100, 255, 255);
-
-  cv::Mat mask;
-  cv::inRange(hsv, lower_green, upper_green, mask);
-
-  cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
-  cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
-
-  std::vector<std::vector<cv::Point>> contours;
-  std::vector<cv::Vec4i> hierarchy;
-  cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL,
-                   cv::CHAIN_APPROX_SIMPLE);
-
-  std::vector<cv::Point> centers;
-
-  std::sort(contours.begin(), contours.end(),
-    [](const std::vector<cv::Point> & a, const std::vector<cv::Point> & b) {
-      return cv::contourArea(a) > cv::contourArea(b);
-    });
-
-  for (const auto & contour : contours) {
-    double area = cv::contourArea(contour);
-
-    if (area <= 200) {
-      continue;
-    }
-
-    cv::Moments m = cv::moments(contour);
-
-    if (m.m00 == 0) {
-      continue;
-    }
-
-    int cX = static_cast<int>(m.m10 / m.m00);
-    int cY = static_cast<int>(m.m01 / m.m00);
-
-    centers.push_back(cv::Point(cX, cY));
-
-    if (outContours) {
-      outContours->push_back(contour);
-    }
-  }
-
-  return centers;
 }
 
 cv::Point NavigationNode::cvtPoint(
@@ -2080,3 +2026,4 @@ int main(int argc, char ** argv)
 
 #include "rclcpp_components/register_node_macro.hpp"
 RCLCPP_COMPONENTS_REGISTER_NODE(NavigationNode);
+
