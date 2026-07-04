@@ -26,6 +26,52 @@
 #include <opencv2/opencv.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <robot_msgs/action/move_time.hpp>
+#include <optional>
+#include <string>
+
+// ============================================================================
+// Vision pipeline types, ported from line_follower_vision.py
+// (LineFollowerVision). These back NavigationNode's "simple" navigation
+// mode only; the graph-based "advanced" mode below is untouched.
+// ============================================================================
+
+// A single foreground run found within one horizontal scan strip.
+struct StripSegment
+{
+  int x_start;
+  int x_end;
+  double x_center;
+  int width;
+};
+
+// One horizontal sample band of the strip scan, at row `y`.
+struct ScanStrip
+{
+  int y;
+  std::vector<StripSegment> segments;
+  bool is_branch = false;         // weak or strong branch/junction signal
+  bool is_branch_strong = false;  // strong signal alone, no corroboration needed
+};
+
+// A detected line junction (byproduct of the strip scan + connected
+// components on the branch-flagged band).
+struct JunctionInfo
+{
+  cv::Point2d center;
+  cv::Rect2d box;
+};
+
+// A detected green marker blob, classified relative to the junction.
+struct GreenBlobInfo
+{
+  cv::Point2d center;
+  double area = 0.0;
+  std::vector<cv::Point> contour;
+  double forward_proj = 0.0;
+  double lateral_proj = 0.0;
+  std::string region;  // "near", "far", "unrelated", "no_junction"
+  std::string side;    // "left", "right", or "" if not applicable
+};
 
 struct Node
 {
@@ -162,9 +208,38 @@ private:
   cv::Mat applyThreshold(cv::Mat & image, uint32_t threshSize, uint32_t kernelSize);
   cv::Point localToGlobalFrame(cv::Point point);
 
-  std::vector<cv::Point> extractGreen(
-    cv::Mat & image,
-    std::vector<std::vector<cv::Point>> * greenContours);
+  // --------------------------------------------------------------------
+  // Ported line-following vision pipeline (from line_follower_vision.py)
+  // Used exclusively by simpleError() / simpleNavigation().
+  // --------------------------------------------------------------------
+  cv::Mat visionBinarize(const cv::Mat & frameBgr);
+  std::vector<ScanStrip> visionScanStrips(const cv::Mat & binary, int h, int w);
+  std::vector<StripSegment> visionFindSegmentsInRow(const std::vector<uint8_t> & rowBool);
+  double visionEstimateLineWidth(const std::vector<ScanStrip> & strips);
+  void visionFlagBranchStrips(std::vector<ScanStrip> & strips, double baselineWidth);
+  std::optional<JunctionInfo> visionDetectJunction(
+    std::vector<ScanStrip> & strips, const cv::Mat & binary);
+  void visionFitSteeringLine(
+    const std::vector<ScanStrip> & strips, bool haveJunction, int w,
+    double & m, double & b, std::vector<cv::Point2d> & fitPoints);
+  double visionSteeringAngle(double m);
+  double visionLineOffset(double m, double b, int h, int w);
+  void visionHeadingVectors(double m, cv::Point2d & forward, cv::Point2d & right);
+  std::vector<GreenBlobInfo> visionDetectGreenBlobs(const cv::Mat & frameBgr);
+  void visionClassifyBlobs(
+    std::vector<GreenBlobInfo> & blobs, const std::optional<JunctionInfo> & junction,
+    const cv::Point2d & forwardVec, const cv::Point2d & rightVec, double baselineWidth);
+  void visionDecide(
+    const std::optional<JunctionInfo> & junction,
+    const std::vector<GreenBlobInfo> & classified,
+    std::string & decision, std::string & decisionReason);
+  cv::Mat visionAnnotate(
+    const cv::Mat & frameBgr, const std::vector<ScanStrip> & strips, double baselineWidth,
+    const std::optional<JunctionInfo> & junction, double m, double b,
+    const std::vector<cv::Point2d> & fitPoints, double steeringAngleDeg,
+    const std::vector<GreenBlobInfo> & classified, const std::string & decision,
+    const std::string & decisionReason, const cv::Point2d & forwardVec);
+
   void extractNodes();
   void extractEdges();
 
@@ -219,4 +294,43 @@ private:
   double searchMinDist;
 
   cv::VideoWriter writer;
+
+  // --------------------------------------------------------------------
+  // Vision tuning constants, ported 1:1 from the class-level constants in
+  // line_follower_vision.py's LineFollowerVision. See that module's
+  // comments for the reasoning behind each value.
+  // --------------------------------------------------------------------
+
+  // --- Binarization (line vs background) ---
+  static constexpr bool VISION_USE_OTSU = true;
+  static constexpr int VISION_FIXED_BINARY_THRESH = 90;  // used only if VISION_USE_OTSU is false
+
+  // --- Region of interest for the strip scan, as a fraction of image height ---
+  static constexpr double VISION_ROI_Y_TOP_RATIO = 0.05;
+  static constexpr double VISION_ROI_Y_BOTTOM_RATIO = 0.95;
+
+  // --- Multi-strip scan ---
+  static constexpr int VISION_NUM_STRIPS = 24;
+  static constexpr int VISION_STRIP_THICKNESS_PX = 6;
+  static constexpr int VISION_MIN_SEGMENT_WIDTH_PX = 4;
+
+  // --- Branch / junction detection (reuses the strip scan) ---
+  static constexpr int VISION_BRANCH_MIN_SEGMENTS = 2;
+  static constexpr double VISION_WIDE_SEGMENT_MULTIPLIER = 1.8;
+  static constexpr double VISION_STRONG_WIDE_SEGMENT_MULTIPLIER = 2.5;
+  static constexpr int VISION_BRANCH_MIN_STRIP_COUNT = 2;
+  static constexpr int VISION_BRANCH_CLUSTER_GAP_STRIPS = 2;
+  static constexpr int VISION_BASELINE_STRIP_COUNT = 3;
+  static constexpr double VISION_DEFAULT_LINE_WIDTH_PX = 20.0;
+
+  // --- Steering line fit ---
+  static constexpr int VISION_MIN_FIT_POINTS = 3;
+
+  // --- Green marker detection (HSV) ---
+  static constexpr int VISION_MIN_GREEN_BLOB_AREA = 15;
+  static constexpr int VISION_MORPH_KERNEL_SIZE = 3;
+
+  // --- Green blob classification relative to the junction ---
+  static constexpr double VISION_NEAR_FORWARD_LIMIT_LINE_WIDTHS = 1.0;
+  static constexpr double VISION_MAX_LATERAL_DIST_LINE_WIDTHS = 4.5;
 };

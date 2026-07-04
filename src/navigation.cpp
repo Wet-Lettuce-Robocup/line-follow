@@ -36,6 +36,10 @@
 #include <std_msgs/msg/float64.hpp>
 #include <numbers>
 #include <vector>
+#include <optional>
+#include <algorithm>
+#include <sstream>
+#include <iomanip>
 #include <Hungarian.h>
 
 using std::placeholders::_1;
@@ -349,16 +353,615 @@ void NavigationNode::publishError(double error)
   this->errorPub->publish(msg);
 }
 
+// ============================================================================
+// Ported line-following vision pipeline
+// (from line_follower_vision.py's LineFollowerVision.process() and its
+// step-by-step helpers). Used exclusively by simpleError() below.
+// ============================================================================
+
+// STEP 1: BINARIZE  (LineFollowerVision._binarize)
+cv::Mat NavigationNode::visionBinarize(const cv::Mat & frameBgr)
+{
+  cv::Mat gray, blurred, binary;
+  cv::cvtColor(frameBgr, gray, cv::COLOR_BGR2GRAY);
+  cv::GaussianBlur(gray, blurred, cv::Size(5, 5), 0);
+
+  if (VISION_USE_OTSU) {
+    cv::threshold(blurred, binary, 0, 255, cv::THRESH_BINARY_INV + cv::THRESH_OTSU);
+  } else {
+    cv::threshold(blurred, binary, VISION_FIXED_BINARY_THRESH, 255, cv::THRESH_BINARY_INV);
+  }
+
+  return binary;  // line pixels == 255
+}
+
+// LineFollowerVision._find_segments_in_row
+std::vector<StripSegment> NavigationNode::visionFindSegmentsInRow(
+  const std::vector<uint8_t> & rowBool)
+{
+  std::vector<StripSegment> segments;
+  bool inRun = false;
+  int start = 0;
+
+  for (int x = 0; x < static_cast<int>(rowBool.size()); x++) {
+    bool val = rowBool[x] != 0;
+    if (val && !inRun) {
+      inRun = true;
+      start = x;
+    } else if (!val && inRun) {
+      inRun = false;
+      int width = x - start;
+      if (width >= VISION_MIN_SEGMENT_WIDTH_PX) {
+        segments.push_back({start, x - 1, (start + x - 1) / 2.0, width});
+      }
+    }
+  }
+
+  if (inRun) {
+    int end = static_cast<int>(rowBool.size()) - 1;
+    int width = end - start + 1;
+    if (width >= VISION_MIN_SEGMENT_WIDTH_PX) {
+      segments.push_back({start, end, (start + end) / 2.0, width});
+    }
+  }
+
+  return segments;
+}
+
+// STEP 2: MULTI-STRIP SCAN  (LineFollowerVision._scan_strips)
+std::vector<ScanStrip> NavigationNode::visionScanStrips(const cv::Mat & binary, int h, int w)
+{
+  int yTop = static_cast<int>(h * VISION_ROI_Y_TOP_RATIO);
+  int yBottom = static_cast<int>(h * VISION_ROI_Y_BOTTOM_RATIO);
+
+  std::vector<ScanStrip> strips;
+  int half = VISION_STRIP_THICKNESS_PX / 2;
+
+  for (int i = 0; i < VISION_NUM_STRIPS; i++) {
+    double t = (VISION_NUM_STRIPS == 1) ?
+      0.0 : static_cast<double>(i) / (VISION_NUM_STRIPS - 1);
+    int y = static_cast<int>(std::round(yTop + t * (yBottom - yTop)));
+
+    int y0 = std::max(0, y - half);
+    int y1 = std::min(h, y + half + 1);
+
+    cv::Mat band = binary(cv::Range(y0, y1), cv::Range(0, w));
+
+    // Collapse the band's thickness: a column counts as foreground if the
+    // majority of rows in the band are foreground.
+    std::vector<uint8_t> collapsed(w, 0);
+    for (int col = 0; col < w; col++) {
+      double sum = 0.0;
+      for (int row = 0; row < band.rows; row++) {
+        sum += band.at<uint8_t>(row, col);
+      }
+      double mean = sum / band.rows;
+      collapsed[col] = (mean > 127) ? 1 : 0;
+    }
+
+    ScanStrip strip;
+    strip.y = y;
+    strip.segments = this->visionFindSegmentsInRow(collapsed);
+    strip.is_branch = false;
+    strip.is_branch_strong = false;
+    strips.push_back(strip);
+  }
+
+  return strips;
+}
+
+// LineFollowerVision._estimate_line_width
+double NavigationNode::visionEstimateLineWidth(const std::vector<ScanStrip> & strips)
+{
+  std::vector<double> widths;
+  for (const ScanStrip & s : strips) {
+    if (s.segments.size() == 1) {
+      widths.push_back(static_cast<double>(s.segments[0].width));
+    }
+  }
+
+  if (static_cast<int>(widths.size()) >= VISION_BASELINE_STRIP_COUNT) {
+    std::sort(widths.begin(), widths.end());
+    size_t n = widths.size();
+    double median = (n % 2 == 0) ?
+      (widths[n / 2 - 1] + widths[n / 2]) / 2.0 :
+      widths[n / 2];
+    return median;
+  }
+
+  return VISION_DEFAULT_LINE_WIDTH_PX;
+}
+
+// LineFollowerVision._flag_branch_strips
+void NavigationNode::visionFlagBranchStrips(std::vector<ScanStrip> & strips, double baselineWidth)
+{
+  for (ScanStrip & s : strips) {
+    bool tooMany = static_cast<int>(s.segments.size()) >= VISION_BRANCH_MIN_SEGMENTS;
+
+    bool tooWide = false;
+    bool veryWide = false;
+    for (const StripSegment & seg : s.segments) {
+      if (seg.width > baselineWidth * VISION_WIDE_SEGMENT_MULTIPLIER) {
+        tooWide = true;
+      }
+      if (seg.width > baselineWidth * VISION_STRONG_WIDE_SEGMENT_MULTIPLIER) {
+        veryWide = true;
+      }
+    }
+
+    s.is_branch = tooMany || tooWide;      // weak signal (needs corroboration)
+    s.is_branch_strong = veryWide;         // strong signal (stands alone)
+  }
+}
+
+// STEP 2b: JUNCTION DETECTION  (LineFollowerVision._detect_junction)
+std::optional<JunctionInfo> NavigationNode::visionDetectJunction(
+  std::vector<ScanStrip> & strips, const cv::Mat & binary)
+{
+  std::vector<int> branchIdx;
+  for (int i = 0; i < static_cast<int>(strips.size()); i++) {
+    if (strips[i].is_branch) {
+      branchIdx.push_back(i);
+    }
+  }
+
+  if (branchIdx.empty()) {
+    return std::nullopt;
+  }
+
+  // Cluster branch-flagged strips by index proximity so an isolated,
+  // spatially-unrelated false-positive strip doesn't get averaged into a
+  // real junction found elsewhere.
+  std::vector<std::vector<int>> clusters;
+  std::vector<int> current = {branchIdx[0]};
+  for (size_t k = 1; k < branchIdx.size(); k++) {
+    int idx = branchIdx[k];
+    if (idx - current.back() <= VISION_BRANCH_CLUSTER_GAP_STRIPS) {
+      current.push_back(idx);
+    } else {
+      clusters.push_back(current);
+      current = {idx};
+    }
+  }
+  clusters.push_back(current);
+
+  // A cluster is a valid junction if it has a strong strip on its own, or
+  // enough weak strips corroborate each other.
+  std::vector<std::vector<int>> validClusters;
+  for (const std::vector<int> & c : clusters) {
+    bool hasStrong = false;
+    for (int i : c) {
+      if (strips[i].is_branch_strong) {
+        hasStrong = true;
+        break;
+      }
+    }
+    if (hasStrong || static_cast<int>(c.size()) >= VISION_BRANCH_MIN_STRIP_COUNT) {
+      validClusters.push_back(c);
+    }
+  }
+
+  if (validClusters.empty()) {
+    return std::nullopt;
+  }
+
+  const std::vector<int> * bestCluster = &validClusters[0];
+  for (const std::vector<int> & c : validClusters) {
+    if (c.size() > bestCluster->size()) {
+      bestCluster = &c;
+    }
+  }
+
+  std::vector<int> clusterYs;
+  for (int i : *bestCluster) {
+    clusterYs.push_back(strips[i].y);
+  }
+
+  int stripSpacing = (strips.size() >= 2) ?
+    (strips[1].y - strips[0].y) : VISION_STRIP_THICKNESS_PX;
+
+  int minY = *std::min_element(clusterYs.begin(), clusterYs.end());
+  int maxY = *std::max_element(clusterYs.begin(), clusterYs.end());
+
+  // Crop the mask to the cluster's y-span (padded by one strip spacing on
+  // each side) and pull out the largest connected foreground blob: a
+  // pixel-mass centroid tolerates an angled approach far better than
+  // averaging per-row segment centers.
+  int y0 = std::max(0, minY - stripSpacing);
+  int y1 = std::min(binary.rows, maxY + stripSpacing + 1);
+
+  cv::Mat band = binary(cv::Range(y0, y1), cv::Range(0, binary.cols));
+
+  cv::Mat labels, stats, centroids;
+  int numLabels = cv::connectedComponentsWithStats(band, labels, stats, centroids, 8);
+
+  if (numLabels <= 1) {
+    return std::nullopt;
+  }
+
+  // label 0 is background; pick the largest foreground component.
+  int largestLabel = 1;
+  int largestArea = stats.at<int>(1, cv::CC_STAT_AREA);
+  for (int lbl = 2; lbl < numLabels; lbl++) {
+    int area = stats.at<int>(lbl, cv::CC_STAT_AREA);
+    if (area > largestArea) {
+      largestArea = area;
+      largestLabel = lbl;
+    }
+  }
+
+  double cx = centroids.at<double>(largestLabel, 0);
+  double cy = centroids.at<double>(largestLabel, 1) + y0;  // back to full-frame coords
+
+  int bx = stats.at<int>(largestLabel, cv::CC_STAT_LEFT);
+  int by = stats.at<int>(largestLabel, cv::CC_STAT_TOP);
+  int bw = stats.at<int>(largestLabel, cv::CC_STAT_WIDTH);
+  int bh = stats.at<int>(largestLabel, cv::CC_STAT_HEIGHT);
+
+  JunctionInfo junction;
+  junction.center = cv::Point2d(cx, cy);
+  junction.box = cv::Rect2d(bx, by + y0, bw, bh);
+
+  return junction;
+}
+
+// STEP 3: STEERING LINE FIT  (LineFollowerVision._fit_steering_line)
+void NavigationNode::visionFitSteeringLine(
+  const std::vector<ScanStrip> & strips, bool haveJunction, int w,
+  double & m, double & b, std::vector<cv::Point2d> & fitPoints)
+{
+  (void)haveJunction;  // kept for parity with the python call site; unused directly
+
+  // Fit using the non-branch strips (the clean approach line); fall back to
+  // every strip if none qualify.
+  std::vector<const ScanStrip *> candidateStrips;
+  for (const ScanStrip & s : strips) {
+    if (!s.is_branch) {
+      candidateStrips.push_back(&s);
+    }
+  }
+  if (candidateStrips.empty()) {
+    for (const ScanStrip & s : strips) {
+      candidateStrips.push_back(&s);
+    }
+  }
+
+  // Per strip, pick the segment closest to image-center as the "primary"
+  // line segment (a stand-in for frame-to-frame tracking).
+  double priorX = w / 2.0;
+  std::vector<double> ptsX, ptsY;
+
+  for (const ScanStrip * s : candidateStrips) {
+    if (s->segments.empty()) {
+      continue;
+    }
+
+    const StripSegment * best = &s->segments[0];
+    double bestDiff = std::abs(best->x_center - priorX);
+    for (const StripSegment & seg : s->segments) {
+      double diff = std::abs(seg.x_center - priorX);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = &seg;
+      }
+    }
+
+    ptsX.push_back(best->x_center);
+    ptsY.push_back(static_cast<double>(s->y));
+  }
+
+  fitPoints.clear();
+  for (size_t i = 0; i < ptsX.size(); i++) {
+    fitPoints.push_back(cv::Point2d(ptsX[i], ptsY[i]));
+  }
+
+  if (static_cast<int>(ptsX.size()) < VISION_MIN_FIT_POINTS) {
+    m = 0.0;
+    b = w / 2.0;
+    return;
+  }
+
+  // Least-squares fit of x = m*y + b (np.polyfit(pts_y, pts_x, 1) equivalent).
+  double n = static_cast<double>(ptsX.size());
+  double sumY = 0.0, sumX = 0.0, sumYY = 0.0, sumXY = 0.0;
+  for (size_t i = 0; i < ptsX.size(); i++) {
+    sumY += ptsY[i];
+    sumX += ptsX[i];
+    sumYY += ptsY[i] * ptsY[i];
+    sumXY += ptsX[i] * ptsY[i];
+  }
+
+  double denom = n * sumYY - sumY * sumY;
+  if (std::abs(denom) < 1e-9) {
+    m = 0.0;
+    b = sumX / n;
+    return;
+  }
+
+  m = (n * sumXY - sumY * sumX) / denom;
+  b = (sumX - m * sumY) / n;
+}
+
+// LineFollowerVision._steering_angle
+double NavigationNode::visionSteeringAngle(double m)
+{
+  // direction of travel vector as y decreases (moving up-frame): (dx, dy) = (-m, -1)
+  // angle measured from "straight ahead" (0,-1); positive = should turn right
+  return std::atan2(-m, 1.0) * 180.0 / std::numbers::pi;
+}
+
+// LineFollowerVision._line_offset
+double NavigationNode::visionLineOffset(double m, double b, int h, int w)
+{
+  double xAtBottom = m * h + b;
+  return xAtBottom - w / 2.0;
+}
+
+// LineFollowerVision._heading_vectors
+void NavigationNode::visionHeadingVectors(double m, cv::Point2d & forward, cv::Point2d & right)
+{
+  double fx = -m;
+  double fy = -1.0;
+  double norm = std::hypot(fx, fy);
+  if (norm < 1e-9) {
+    norm = 1.0;
+  }
+  forward = cv::Point2d(fx / norm, fy / norm);
+  // right_vector = forward rotated -90 degrees (clockwise) in image coords
+  right = cv::Point2d(-forward.y, forward.x);
+}
+
+// STEP 4a: GREEN BLOB DETECTION  (LineFollowerVision._detect_green_blobs)
+std::vector<GreenBlobInfo> NavigationNode::visionDetectGreenBlobs(const cv::Mat & frameBgr)
+{
+  cv::Mat hsv;
+  cv::cvtColor(frameBgr, hsv, cv::COLOR_BGR2HSV);
+
+  cv::Scalar lowerGreen(40, 60, 60);
+  cv::Scalar upperGreen(85, 255, 255);
+
+  cv::Mat mask;
+  cv::inRange(hsv, lowerGreen, upperGreen, mask);
+
+  cv::Mat kernel = cv::getStructuringElement(
+    cv::MORPH_ELLIPSE, cv::Size(VISION_MORPH_KERNEL_SIZE, VISION_MORPH_KERNEL_SIZE));
+  cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
+  cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, kernel);
+
+  std::vector<std::vector<cv::Point>> contours;
+  cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+  std::vector<GreenBlobInfo> blobs;
+  for (const std::vector<cv::Point> & c : contours) {
+    double area = cv::contourArea(c);
+    if (area < VISION_MIN_GREEN_BLOB_AREA) {
+      continue;
+    }
+
+    cv::Moments mo = cv::moments(c);
+    if (mo.m00 == 0) {
+      continue;
+    }
+
+    GreenBlobInfo blob;
+    blob.center = cv::Point2d(mo.m10 / mo.m00, mo.m01 / mo.m00);
+    blob.area = area;
+    blob.contour = c;
+    blobs.push_back(blob);
+  }
+
+  return blobs;
+}
+
+// STEP 4b: GREEN BLOB CLASSIFICATION  (LineFollowerVision._classify_blobs)
+void NavigationNode::visionClassifyBlobs(
+  std::vector<GreenBlobInfo> & blobs, const std::optional<JunctionInfo> & junction,
+  const cv::Point2d & forwardVec, const cv::Point2d & rightVec, double baselineWidth)
+{
+  double nearForwardLimit = baselineWidth * VISION_NEAR_FORWARD_LIMIT_LINE_WIDTHS;
+  double maxLateralDist = baselineWidth * VISION_MAX_LATERAL_DIST_LINE_WIDTHS;
+
+  for (GreenBlobInfo & blob : blobs) {
+    if (!junction.has_value()) {
+      blob.region = "no_junction";
+      blob.side = "";
+      continue;
+    }
+
+    double relX = blob.center.x - junction->center.x;
+    double relY = blob.center.y - junction->center.y;
+
+    double forwardProj = relX * forwardVec.x + relY * forwardVec.y;
+    double lateralProj = relX * rightVec.x + relY * rightVec.y;
+
+    blob.forward_proj = forwardProj;
+    blob.lateral_proj = lateralProj;
+
+    if (std::abs(lateralProj) > maxLateralDist) {
+      // Guards against unrelated green blobs elsewhere in frame.
+      blob.region = "unrelated";
+      blob.side = "";
+    } else if (forwardProj > nearForwardLimit) {
+      // Sits well past the junction center: a corner that does not touch
+      // the arm we're arriving on -> ignore for decision purposes.
+      blob.region = "far";
+      blob.side = (lateralProj > 0) ? "right" : "left";
+    } else {
+      blob.region = "near";
+      blob.side = (lateralProj > 0) ? "right" : "left";
+    }
+  }
+}
+
+// STEP 5: DECISION FUSION  (LineFollowerVision._decide)
+void NavigationNode::visionDecide(
+  const std::optional<JunctionInfo> & junction,
+  const std::vector<GreenBlobInfo> & classified,
+  std::string & decision, std::string & decisionReason)
+{
+  if (!junction.has_value()) {
+    decision = "STRAIGHT";
+    decisionReason = "no junction detected, following line";
+    return;
+  }
+
+  bool left = false;
+  bool right = false;
+  for (const GreenBlobInfo & b : classified) {
+    if (b.region == "near") {
+      if (b.side == "left") {left = true;}
+      if (b.side == "right") {right = true;}
+    }
+  }
+
+  if (left && right) {
+    decision = "TURN_180";
+    decisionReason = "green markers on both sides of the incoming arm";
+  } else if (left) {
+    decision = "TURN_LEFT";
+    decisionReason = "green marker on left side of incoming arm";
+  } else if (right) {
+    decision = "TURN_RIGHT";
+    decisionReason = "green marker on right side of incoming arm";
+  } else {
+    decision = "STRAIGHT";
+    decisionReason = "junction present but no relevant markers on this arm";
+  }
+}
+
+// ANNOTATION / DEBUG DRAWING  (LineFollowerVision._annotate)
+cv::Mat NavigationNode::visionAnnotate(
+  const cv::Mat & frameBgr, const std::vector<ScanStrip> & strips, double baselineWidth,
+  const std::optional<JunctionInfo> & junction, double m, double b,
+  const std::vector<cv::Point2d> & fitPoints, double steeringAngleDeg,
+  const std::vector<GreenBlobInfo> & classified, const std::string & decision,
+  const std::string & decisionReason, const cv::Point2d & forwardVec)
+{
+  (void)baselineWidth;  // not needed for drawing; kept for parity with the python signature
+
+  cv::Mat out = frameBgr.clone();
+  int h = out.rows;
+  int w = out.cols;
+
+  const cv::Scalar colorLineNormal(0, 255, 255);   // yellow: non-branch strip segment
+  const cv::Scalar colorLineBranch(0, 128, 255);   // orange: branch strip segment
+  const cv::Scalar colorSteer(255, 0, 255);        // magenta: fitted steering line
+  const cv::Scalar colorJunction(255, 0, 0);       // blue: junction box
+  const cv::Scalar colorBlobNear(0, 255, 0);       // green: near/relevant blob
+  const cv::Scalar colorBlobFar(128, 128, 128);    // gray: far/ignored blob
+  const cv::Scalar colorText(255, 255, 255);
+  const cv::Scalar colorTextBg(0, 0, 0);
+
+  // --- strip scan segments ---
+  for (const ScanStrip & s : strips) {
+    int y = s.y;
+    cv::Scalar color = s.is_branch ? colorLineBranch : colorLineNormal;
+    cv::line(out, cv::Point(0, y), cv::Point(w, y), cv::Scalar(60, 60, 60), 1, cv::LINE_AA);
+    for (const StripSegment & seg : s.segments) {
+      cv::line(out, cv::Point(seg.x_start, y), cv::Point(seg.x_end, y), color, 3);
+      cv::circle(out, cv::Point(static_cast<int>(seg.x_center), y), 3, color, -1);
+    }
+  }
+
+  // --- fitted steering line ---
+  int y0 = 0;
+  int y1 = h - 1;
+  int x0 = static_cast<int>(m * y0 + b);
+  int x1 = static_cast<int>(m * y1 + b);
+  cv::line(out, cv::Point(x0, y0), cv::Point(x1, y1), colorSteer, 2, cv::LINE_AA);
+  for (const cv::Point2d & p : fitPoints) {
+    cv::circle(out, cv::Point(static_cast<int>(p.x), static_cast<int>(p.y)), 4, colorSteer, 1);
+  }
+
+  // --- junction box + center + forward vector ---
+  if (junction.has_value()) {
+    double pad = 15;
+    cv::rectangle(
+      out,
+      cv::Point(
+        static_cast<int>(junction->box.x - pad), static_cast<int>(junction->box.y - pad)),
+      cv::Point(
+        static_cast<int>(junction->box.x + junction->box.width + pad),
+        static_cast<int>(junction->box.y + junction->box.height + pad)),
+      colorJunction, 2);
+
+    cv::Point jCenter(
+      static_cast<int>(junction->center.x), static_cast<int>(junction->center.y));
+    cv::circle(out, jCenter, 5, colorJunction, -1);
+
+    cv::Point tip(
+      static_cast<int>(junction->center.x + forwardVec.x * 40),
+      static_cast<int>(junction->center.y + forwardVec.y * 40));
+    cv::arrowedLine(out, jCenter, tip, colorJunction, 2, cv::LINE_8, 0, 0.3);
+  }
+
+  // --- green blobs ---
+  for (const GreenBlobInfo & blob : classified) {
+    cv::Scalar color = (blob.region == "near") ? colorBlobNear : colorBlobFar;
+    std::vector<std::vector<cv::Point>> contourWrapper = {blob.contour};
+    cv::drawContours(out, contourWrapper, -1, color, 2);
+
+    std::string label = (blob.side.empty() ? "?" : blob.side) + "/" + blob.region;
+    cv::putText(
+      out, label,
+      cv::Point(static_cast<int>(blob.center.x) + 8, static_cast<int>(blob.center.y)),
+      cv::FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv::LINE_AA);
+  }
+
+  // --- text overlay (steering angle, decision) ---
+  std::ostringstream angleStream;
+  angleStream << std::showpos << std::fixed << std::setprecision(1) <<
+    steeringAngleDeg << " deg";
+
+  std::vector<std::string> lines = {
+    "steering: " + angleStream.str(),
+    std::string("junction: ") + (junction.has_value() ? "YES" : "no"),
+    "decision: " + decision,
+    "reason: " + decisionReason,
+  };
+
+  int textX = 10;
+  int textY = 10;
+  int lineH = 20;
+  int boxW = 0;
+  for (const std::string & line : lines) {
+    int baseline = 0;
+    cv::Size sz = cv::getTextSize(line, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseline);
+    boxW = std::max(boxW, sz.width);
+  }
+  boxW += 20;
+
+  cv::rectangle(
+    out, cv::Point(textX, textY),
+    cv::Point(textX + boxW, textY + lineH * static_cast<int>(lines.size()) + 10),
+    colorTextBg, -1);
+
+  for (size_t i = 0; i < lines.size(); i++) {
+    int ty = textY + lineH * (static_cast<int>(i) + 1);
+    cv::putText(
+      out, lines[i], cv::Point(textX + 10, ty), cv::FONT_HERSHEY_SIMPLEX, 0.5,
+      colorText, 1, cv::LINE_AA);
+  }
+
+  return out;
+}
+
+// ============================================================================
+// PUBLIC ENTRY POINT for simple navigation
+// (mirrors LineFollowerVision.process(), then reduces its high-level
+// decision into the scalar steering error the rest of NavigationNode
+// expects)
+// ============================================================================
 double NavigationNode::simpleError(const cv::Mat & frame)
 {
   int newWidth = static_cast<int>(frame.cols * 0.8);
   int newHeight = static_cast<int>(frame.rows * 0.6);
 
-    // 2. Calculate coordinates to center the crop box
+  // Center-crop, then resize, exactly as before: this keeps the vision
+  // pipeline working on a consistent frame size regardless of the raw
+  // camera resolution.
   int x = (frame.cols - newWidth) / 2;
   int y = (frame.rows - newHeight) / 2;
-
-    // 3. Define the Region of Interest (ROI) and crop
   cv::Rect roi(x, y, newWidth, newHeight);
   cv::Mat croppedImg = frame(roi);
 
@@ -366,140 +969,76 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   cv::Size dsize(854, 480);
   cv::resize(croppedImg, resized, dsize);
 
-  cv::Mat thresh = this->applyThreshold(resized, 255, 35);
-    // 3. Find contours
-  std::vector<std::vector<cv::Point>> contours;
-  cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+  int h = resized.rows;
+  int w = resized.cols;
 
-    // Annotated frame that gets written to the output video. Built on top of
-    // the color resized image (not the binary threshold mask) so contours,
-    // COM markers, and green blobs are all visible in color.
-  cv::Mat processed = resized.clone();
+  // 1. Binarize
+  cv::Mat binary = this->visionBinarize(resized);
 
-    // If no contours are found, return 0 error
-  if (contours.empty()) {
-    this->writer.write(processed);
-    return 0.0;
-  }
+  // 2. Multi-strip scan -> per-strip segments, doubling as junction detector
+  std::vector<ScanStrip> strips = this->visionScanStrips(binary, h, w);
+  double baselineWidth = this->visionEstimateLineWidth(strips);
+  this->visionFlagBranchStrips(strips, baselineWidth);
 
-    // 4. Find the largest contour (assuming this is our line)
-  size_t largestContourIdx = 0;
-  double maxArea = 0.0;
-  for (size_t i = 0; i < contours.size(); ++i) {
-    double area = cv::contourArea(contours[i]);
-    if (area > maxArea) {
-      maxArea = area;
-      largestContourIdx = i;
-    }
-  }
+  // 2b. Junction detection (byproduct of the strip scan)
+  std::optional<JunctionInfo> junction = this->visionDetectJunction(strips, binary);
 
-    // --- Draw all detected line contours in black ---
-    // Every contour thin, the one we believe is the actual line drawn
-    // thicker so it stands out.
-  cv::drawContours(processed, contours, -1, cv::Scalar(0, 0, 0), 1);
-  cv::drawContours(processed, contours, static_cast<int>(largestContourIdx),
-    cv::Scalar(0, 0, 0), 3);
+  // 3. Steering line fit
+  double m = 0.0;
+  double b = w / 2.0;
+  std::vector<cv::Point2d> fitPoints;
+  this->visionFitSteeringLine(strips, junction.has_value(), w, m, b, fitPoints);
 
-    // Optional: Filter out tiny noise
-  if (maxArea < 100.0) {
-    this->writer.write(processed);
-    return 0.0;
-  }
+  double steeringAngleDeg = this->visionSteeringAngle(m);
 
-    // 5. Calculate the Center of Mass (Centroid) using Moments
-  cv::Moments m = cv::moments(contours[largestContourIdx]);
+  cv::Point2d forwardVec, rightVec;
+  this->visionHeadingVectors(m, forwardVec, rightVec);
 
-    // Prevent division by zero
-  if (m.m00 == 0) {
-    this->writer.write(processed);
-    return 0.0;
-  }
+  // 4. Green marker detection + classification relative to the junction
+  std::vector<GreenBlobInfo> greenBlobs = this->visionDetectGreenBlobs(resized);
+  this->visionClassifyBlobs(greenBlobs, junction, forwardVec, rightVec, baselineWidth);
 
-    // Centroid of the largest line contour, in resized-frame coordinates.
-  cv::Point2d lineCentroid(m.m10 / m.m00, m.m01 / m.m00);
+  // 5. Decision fusion
+  std::string decision, decisionReason;
+  this->visionDecide(junction, greenBlobs, decision, decisionReason);
 
-    // --- Green-weighted target point ---
-    // Distance (in resized-frame pixels) within which a detected green
-    // blob is considered close enough to the line's centroid to pull
-    // the target point toward it (e.g. rescue markers, junction markers).
-  const double greenDistThreshold = 150.0;
-    // Relative weighting of a qualifying green centroid versus the
-    // line contour's own centroid when averaging the target point.
-    // >1.0 means green contours are weighted more heavily than the line COM.
-  const double greenWeight = 25.0;
-
-  std::vector<std::vector<cv::Point>> greenContours;
-  std::vector<cv::Point> greenCenters = this->extractGreen(resized, &greenContours);
-
-    // --- Draw green contours in green ---
-  cv::drawContours(processed, greenContours, -1, cv::Scalar(0, 255, 0), 2);
-
-  if (greenCenters.size() >= 2) {
-    cv::Point p1 = greenCenters[0];
-    cv::Point p2 = greenCenters[1];
-
-    double angle = this->calculateAngle(p1, p2);
-    if (std::abs(angle) < 0.5 || std::abs(angle) > std::numbers::pi - 0.5) {
-      RCLCPP_INFO(this->get_logger(), "Starting double green");
-      this->sendMovementGoal(0, 100, 3.3);
-      this->state = GREEN_ROTATE;
-      RCLCPP_INFO(this->get_logger(), "Sent double green start message");
-      return 0;
-    }
-  }
-
-  cv::Point2d greenSum = cv::Point2d();
-  double totalWeight = 1.0;
-
-  for (const cv::Point & greenPoint : greenCenters) {
-    double dist = this->calculateDist(
-      greenPoint, cv::Point(static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)));
-
-      // Mark each green blob centre: yellow if it contributed to the
-      // weighted target point, red if it was too far away and ignored.
-    cv::Scalar markerColor = (dist <= greenDistThreshold) ?
-      cv::Scalar(0, 255, 255) :
-      cv::Scalar(0, 0, 255);
-    cv::circle(processed, greenPoint, 6, markerColor, -1);
-
-    if (dist > greenDistThreshold) {
-      continue;
-    }
-
-    greenSum += greenWeight * (cv::Point2d(greenPoint.x, greenPoint.y) - lineCentroid);
-    totalWeight += greenWeight;
-  }
-
-  cv::Point2d targetPoint = lineCentroid + greenSum / totalWeight;
-
-    // --- COM annotations (resized-frame coordinates) ---
-    // Raw line centroid, before green-weighting: magenta.
-  cv::circle(processed, cv::Point(
-      static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)),
-    8, cv::Scalar(255, 0, 255), -1);
-
-    // Final green-weighted target point: cyan circle + crosshair.
-  cv::Point targetPx(static_cast<int>(targetPoint.x), static_cast<int>(targetPoint.y));
-  cv::circle(processed, targetPx, 10, cv::Scalar(255, 255, 0), 2);
-  cv::drawMarker(processed, targetPx, cv::Scalar(255, 255, 0), cv::MARKER_CROSS, 20, 2);
-
-    // Undo the crop offset to bring the target point back into full-frame coordinates.
-  targetPoint.x += x;
-  targetPoint.y += y;
-
-    // 6. Stationary reference point: bottom-middle of the (uncropped) frame.
-  cv::Point2d stationaryPoint(frame.cols / 2.0, frame.rows);
-
-  double dx = targetPoint.x - stationaryPoint.x;
-  double dy = stationaryPoint.y - targetPoint.y;  // flip so "straight ahead" is positive dy
-
-    // Error is now the heading angle from the stationary point to the
-    // (green-weighted) target centroid, rather than a raw pixel offset.
-  double error = std::atan2(dx, dy);
-  double length = std::sqrt(dx * dx + dy * dy);
-  error *= length;
-
+  cv::Mat processed = this->visionAnnotate(
+    resized, strips, baselineWidth, junction, m, b, fitPoints, steeringAngleDeg,
+    greenBlobs, decision, decisionReason, forwardVec);
   this->writer.write(processed);
+
+  // --- Reduce the module's high-level decision into a scalar error ---
+  //
+  // The python module hands back STRAIGHT / TURN_LEFT / TURN_RIGHT /
+  // TURN_180 plus a continuous steering angle; simpleNavigation() only
+  // wants one steering error to publish, so:
+  //   - TURN_180 (green markers on both sides of the incoming arm) is
+  //     handled exactly like the old "double green" behaviour: kick off
+  //     a rotate-in-place maneuver and let the state machine take over.
+  //   - otherwise, the error follows the fitted line's steering angle,
+  //     nudged by how far off-center the line sits at the bottom row
+  //     (mirrors line_offset_px), and gets a hard bias toward whichever
+  //     side a single green marker calls for at a junction.
+  // The bias magnitude and offset weighting are new tuning knobs (they
+  // don't exist in the python module, which only reports a decision) and
+  // will likely need retuning against the real 0.01 gain in publishError.
+  if (decision == "TURN_180") {
+    RCLCPP_INFO(this->get_logger(), "Starting double green (180)");
+    this->sendMovementGoal(0, 100, 3.3);
+    this->state = GREEN_ROTATE;
+    RCLCPP_INFO(this->get_logger(), "Sent double green start message");
+    return 0.0;
+  }
+
+  double lineOffsetPx = this->visionLineOffset(m, b, h, w);
+  double error = steeringAngleDeg + lineOffsetPx * 0.05;
+
+  const double turnBiasDeg = 45.0;
+  if (decision == "TURN_LEFT") {
+    error -= turnBiasDeg;
+  } else if (decision == "TURN_RIGHT") {
+    error += turnBiasDeg;
+  }
 
   return error;
 }
