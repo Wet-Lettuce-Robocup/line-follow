@@ -717,11 +717,17 @@ std::vector<GreenBlobInfo> NavigationNode::visionDetectGreenBlobs(const cv::Mat 
   cv::Mat hsv;
   cv::cvtColor(frameBgr, hsv, cv::COLOR_BGR2HSV);
 
-  cv::Scalar lowerGreen(40, 60, 60);
-  cv::Scalar upperGreen(85, 255, 255);
+  cv::Mat mask1, mask2, mask;
 
-  cv::Mat mask;
-  cv::inRange(hsv, lowerGreen, upperGreen, mask);
+    // Lower Red Range: Hue 0 to 10
+    // Saturation and Value are set to catch vivid colors while filtering out noise
+  cv::inRange(hsv, cv::Scalar(0, 100, 100), cv::Scalar(10, 255, 255), mask1);
+
+    // Upper Red Range: Hue 160 to 180
+  cv::inRange(hsv, cv::Scalar(160, 100, 100), cv::Scalar(180, 255, 255), mask2);
+
+    // 4. Combine both thresholds using a bitwise OR operation
+  cv::bitwise_or(mask1, mask2, mask);
 
   cv::Mat kernel = cv::getStructuringElement(
     cv::MORPH_ELLIPSE, cv::Size(VISION_MORPH_KERNEL_SIZE, VISION_MORPH_KERNEL_SIZE));
@@ -2026,4 +2032,3 @@ int main(int argc, char ** argv)
 
 #include "rclcpp_components/register_node_macro.hpp"
 RCLCPP_COMPONENTS_REGISTER_NODE(NavigationNode);
-
