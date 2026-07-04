@@ -310,14 +310,14 @@ private:
   static constexpr double VISION_ROI_Y_BOTTOM_RATIO = 0.95;
 
   // --- Multi-strip scan ---
-  static constexpr int VISION_NUM_STRIPS = 24;
-  static constexpr int VISION_STRIP_THICKNESS_PX = 6;
+  static constexpr int VISION_NUM_STRIPS = 12;
+  static constexpr int VISION_STRIP_THICKNESS_PX = 12;
   static constexpr int VISION_MIN_SEGMENT_WIDTH_PX = 4;
 
   // --- Branch / junction detection (reuses the strip scan) ---
   static constexpr int VISION_BRANCH_MIN_SEGMENTS = 2;
-  static constexpr double VISION_WIDE_SEGMENT_MULTIPLIER = 1.8;
-  static constexpr double VISION_STRONG_WIDE_SEGMENT_MULTIPLIER = 2.5;
+  static constexpr double VISION_WIDE_SEGMENT_MULTIPLIER = 2.3;
+  static constexpr double VISION_STRONG_WIDE_SEGMENT_MULTIPLIER = 3;
   static constexpr int VISION_BRANCH_MIN_STRIP_COUNT = 2;
   static constexpr int VISION_BRANCH_CLUSTER_GAP_STRIPS = 2;
   static constexpr int VISION_BASELINE_STRIP_COUNT = 3;
