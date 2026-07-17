@@ -53,4 +53,5 @@ private:
 
   void errorCallback(std_msgs::msg::Float64::SharedPtr error);
   void sendManualI2C(int32_t error);
+  void stop();
 };

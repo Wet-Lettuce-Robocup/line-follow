@@ -18,12 +18,14 @@
 #include <rclcpp/publisher.hpp>
 #include <rclcpp/subscription.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
 #include "nav_msgs/msg/odometry.hpp"
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <opencv2/opencv.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <robot_msgs/action/move_time.hpp>
 
 struct Node
 {
@@ -100,6 +102,8 @@ enum LineFollowState
   TOWER_ROTATE_START,
   TOWER_MOVE,
   TOWER_ROTATE_END,
+  GREEN_ROTATE,
+  GREEN_MOVE_FORWARD,
   COMPLETE
 };
 
@@ -127,8 +131,12 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float64>> errorPub;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Bool>> lineCompletePub;
+  rclcpp::TimerBase::SharedPtr timer_;
+
+  rclcpp_action::Client<robot_msgs::action::MoveTime>::SharedPtr actionClient;
 
   LineFollowState state;
+  cv::Mat currentFrame;
 
   cv::Point cvtPoint(cv::Mat & src, cv::Mat & dst, cv::Point point);
 
@@ -137,14 +145,26 @@ private:
 
   void imageCallback(sensor_msgs::msg::Image::SharedPtr msg);
   void odomCallback(nav_msgs::msg::Odometry::SharedPtr msg);
+  void goalResponseCallback(
+    const rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::SharedPtr & goalHandle);
+  void goalFeedbackCallback(
+    rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::SharedPtr,
+    const std::shared_ptr<const robot_msgs::action::MoveTime::Feedback> feedback);
+  void goalResultCallback(
+    const rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::WrappedResult & result);
   double simpleError(const cv::Mat & frame);
   void publishError(double error);
+  void timerCallback();
+
+  void sendMovementGoal(double vel, double angular_vel, double time);
 
   cv::Mat processImage(cv::Mat & image);
   cv::Mat applyThreshold(cv::Mat & image, uint32_t threshSize, uint32_t kernelSize);
   cv::Point localToGlobalFrame(cv::Point point);
 
-  std::vector<cv::Point> extractGreen(cv::Mat & image);
+  std::vector<cv::Point> extractGreen(
+    cv::Mat & image,
+    std::vector<std::vector<cv::Point>> * greenContours);
   void extractNodes();
   void extractEdges();
 

@@ -28,7 +28,7 @@ PIDLoop::PIDLoop(const rclcpp::NodeOptions & options)
   this->declare_parameter<double>("kp", 0.1);
   this->declare_parameter<double>("ki", 0.0);
   this->declare_parameter<double>("kd", 0.0);
-  this->declare_parameter<int>("default_speed", 50);
+  this->declare_parameter<int>("default_speed", 60);
 
   this->kp = this->get_parameter("kp").as_double();
   this->ki = this->get_parameter("ki").as_double();
@@ -58,6 +58,7 @@ CallbackReturn PIDLoop::on_activate(const rclcpp_lifecycle::State &)
 
 CallbackReturn PIDLoop::on_deactivate(const rclcpp_lifecycle::State &)
 {
+  this->stop();
   this->twistPub->on_deactivate();
 
   return CallbackReturn::SUCCESS;
@@ -106,6 +107,36 @@ void PIDLoop::errorCallback(std_msgs::msg::Float64::SharedPtr msg)
   this->twistPub->publish(twist_msg);
 }
 
+void PIDLoop::stop()
+{
+  const char * device = "/dev/i2c-1";
+  int i2c_fd = open(device, O_RDWR);
+
+  if (i2c_fd < 0) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to open the I2C bus: %s", device);
+    return;
+  }
+
+  int slave_address = 0x67;
+  if (ioctl(i2c_fd, I2C_SLAVE, slave_address) < 0) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to acquire bus access/talk to slave.");
+    close(i2c_fd);
+    return;
+  }
+
+  uint8_t buffer[1] = {0x02};
+
+  ssize_t bytes_written = write(i2c_fd, buffer, sizeof(buffer));
+
+  if (bytes_written != sizeof(buffer)) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to write to the I2C bus.");
+    close(i2c_fd);
+    return;
+  }
+
+  close(i2c_fd);
+}
+
 void PIDLoop::sendManualI2C(int32_t error)
 {
   const char * device = "/dev/i2c-1";
@@ -123,8 +154,8 @@ void PIDLoop::sendManualI2C(int32_t error)
     return;
   }
 
-  uint32_t speed = this->defaultSpeed - 0.3 * std::abs(error);
-  if (std::abs(error) > 70) speed = 0;
+  uint32_t speed = this->defaultSpeed - 0.15 * std::abs(error);
+  if (std::abs(error) > 70) {speed = 0;}
 
   uint8_t buffer[13];
 

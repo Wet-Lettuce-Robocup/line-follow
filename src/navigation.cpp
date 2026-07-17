@@ -26,16 +26,21 @@
 #include <rclcpp/qos.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include "nav_msgs/msg/odometry.hpp"
+#include "robot_msgs/action/move_time.hpp"
 #include <lifecycle_msgs/msg/state.hpp>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <unordered_map>
 #include <cv_bridge/cv_bridge.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <numbers>
+#include <vector>
 #include <Hungarian.h>
 
 using std::placeholders::_1;
+using std::placeholders::_2;
+using namespace std::chrono_literals;
 
 NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
 : rclcpp_lifecycle::LifecycleNode("navigation", options)
@@ -100,6 +105,13 @@ CallbackReturn NavigationNode::on_configure(const rclcpp_lifecycle::State &)
     this->create_subscription<nav_msgs::msg::Odometry>("/odom", 10,
     std::bind(&NavigationNode::odomCallback, this, _1));
 
+  timer_ = this->create_wall_timer(33ms, std::bind(&NavigationNode::timerCallback, this));
+  timer_->cancel();
+  this->actionClient = rclcpp_action::create_client<robot_msgs::action::MoveTime>(
+      this,
+      "/move_time" // Must match the server's action name
+  );
+
   return CallbackReturn::SUCCESS;
 }
 
@@ -107,6 +119,9 @@ CallbackReturn NavigationNode::on_activate(const rclcpp_lifecycle::State & state
 {
   this->errorPub->on_activate();
   this->lineCompletePub->on_activate();
+  timer_->reset();
+
+  this->state = FOLLOWING;
 
   return rclcpp_lifecycle::LifecycleNode::on_activate(state);
 }
@@ -115,6 +130,7 @@ CallbackReturn NavigationNode::on_deactivate(const rclcpp_lifecycle::State & sta
 {
   this->errorPub->on_deactivate();
   this->lineCompletePub->on_deactivate();
+  timer_->cancel();
 
   return rclcpp_lifecycle::LifecycleNode::on_deactivate(state);
 }
@@ -124,6 +140,7 @@ CallbackReturn NavigationNode::on_cleanup(const rclcpp_lifecycle::State &)
   this->errorPub.reset();
   this->imageSub.reset();
   this->odomSub.reset();
+  timer_->reset();
 
   return CallbackReturn::SUCCESS;
 }
@@ -153,6 +170,88 @@ TrackedNode::TrackedNode(cv::Point pos)
   kf.statePost.at<float>(3) = 0.0f;  // Initial velocity Y
 
   this->pos = pos;
+}
+
+void NavigationNode::sendMovementGoal(double vel, double angular_vel, double time)
+{
+  if (!this->actionClient->wait_for_action_server(std::chrono::seconds(10))) {
+    RCLCPP_ERROR(this->get_logger(), "Action server not available.");
+    return;
+  }
+
+  auto goalMsg = robot_msgs::action::MoveTime::Goal();
+  goalMsg.vel = vel;
+  goalMsg.angular_vel = angular_vel;
+  goalMsg.time = time;
+
+  auto sendGoalOptions = rclcpp_action::Client<robot_msgs::action::MoveTime>::SendGoalOptions();
+
+  sendGoalOptions.goal_response_callback =
+    std::bind(&NavigationNode::goalResponseCallback, this, _1);
+  sendGoalOptions.feedback_callback = std::bind(&NavigationNode::goalFeedbackCallback, this, _1,
+    _2);
+  sendGoalOptions.result_callback =
+    std::bind(&NavigationNode::goalResultCallback, this, _1);
+
+  this->actionClient->async_send_goal(goalMsg, sendGoalOptions);
+}
+
+void NavigationNode::goalResponseCallback(
+  const rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::SharedPtr & goalHandle)
+{
+  if (!goalHandle) {
+    RCLCPP_ERROR(this->get_logger(), "Movement goal rejected!");
+  } else {
+    RCLCPP_INFO(this->get_logger(), "Movement goal accepted!");
+  }
+}
+
+void NavigationNode::goalFeedbackCallback(
+  rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::SharedPtr,
+  const std::shared_ptr<const robot_msgs::action::MoveTime::Feedback> _) {}
+
+void NavigationNode::goalResultCallback(
+  const rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::WrappedResult & result)
+{
+  switch (result.code) {
+    case rclcpp_action::ResultCode::SUCCEEDED:
+      RCLCPP_INFO(this->get_logger(), "Goal succeeded!");
+      break;
+    case rclcpp_action::ResultCode::ABORTED:
+      RCLCPP_ERROR(this->get_logger(), "Goal was aborted");
+      return;
+    case rclcpp_action::ResultCode::CANCELED:
+      RCLCPP_WARN(this->get_logger(), "Goal was canceled");
+      return;
+    default:
+      RCLCPP_ERROR(this->get_logger(), "Unknown result code");
+      return;
+  }
+  switch (this->state) {
+    case FOLLOWING:
+      break;
+    case TOWER_ROTATE_START:
+      this->sendMovementGoal(100, 100, 10);
+      this->state = TOWER_MOVE;
+      break;
+    case TOWER_MOVE:
+      this->sendMovementGoal(100, 100, 10);
+      this->state = TOWER_ROTATE_END;
+      break;
+    case TOWER_ROTATE_END:
+      this->sendMovementGoal(100, 100, 10);
+      this->state = FOLLOWING;
+      break;
+    case GREEN_ROTATE:
+      this->sendMovementGoal(100, 0, 0.2);
+      this->state = GREEN_MOVE_FORWARD;
+      break;
+    case GREEN_MOVE_FORWARD:
+      this->state = FOLLOWING;
+      break;
+    case COMPLETE:
+      break;
+  }
 }
 
 std::vector<std::vector<double>> TrackedGraph::getCostMatrix(Graph & graph)
@@ -202,12 +301,37 @@ void NavigationNode::imageCallback(sensor_msgs::msg::Image::SharedPtr msg)
 
   cv::Mat frame = cv_ptr->image;
 
-  switch (this->navigationType) {
-    case NavigationType::SIMPLE:
-      this->simpleNavigation(frame);
+  this->currentFrame = frame;
+}
+
+void NavigationNode::timerCallback()
+{
+  switch (this->state) {
+    case FOLLOWING: {
+        if (this->currentFrame.empty()) {return;}
+
+        switch (this->navigationType) {
+          case NavigationType::SIMPLE:
+            this->simpleNavigation(this->currentFrame);
+            break;
+          case NavigationType::ADVANCED:
+            this->advancedNavigation(this->currentFrame);
+            break;
+        }
+
+        break;
+      }
+    case TOWER_ROTATE_START:
       break;
-    case NavigationType::ADVANCED:
-      this->advancedNavigation(frame);
+    case TOWER_MOVE:
+      break;
+    case TOWER_ROTATE_END:
+      break;
+    case GREEN_ROTATE:
+      break;
+    case GREEN_MOVE_FORWARD:
+      break;
+    case COMPLETE:
       break;
   }
 }
@@ -222,7 +346,7 @@ void NavigationNode::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 void NavigationNode::publishError(double error)
 {
   std_msgs::msg::Float64 msg = std_msgs::msg::Float64();
-  msg.data = error * 3.5;
+  msg.data = error * 350;
   this->errorPub->publish(msg);
 }
 
@@ -248,8 +372,14 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   std::vector<std::vector<cv::Point>> contours;
   cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
+    // Annotated frame that gets written to the output video. Built on top of
+    // the color resized image (not the binary threshold mask) so contours,
+    // COM markers, and green blobs are all visible in color.
+    // cv::Mat processed = resized.clone();
+
     // If no contours are found, return 0 error
   if (contours.empty()) {
+    // this->writer.write(processed);
     return 0.0;
   }
 
@@ -264,8 +394,16 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     }
   }
 
+    // --- Draw all detected line contours in black ---
+    // Every contour thin, the one we believe is the actual line drawn
+    // thicker so it stands out.
+    // cv::drawContours(processed, contours, -1, cv::Scalar(0, 0, 0), 1);
+    // cv::drawContours(processed, contours, static_cast<int>(largestContourIdx),
+    //   cv::Scalar(0, 0, 0), 3);
+
     // Optional: Filter out tiny noise
   if (maxArea < 100.0) {
+    // this->writer.write(processed);
     return 0.0;
   }
 
@@ -273,28 +411,105 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   cv::Moments m = cv::moments(contours[largestContourIdx]);
 
     // Prevent division by zero
-  if (m.m00 == 0) {return 0.0;}
+  if (m.m00 == 0) {
+    // this->writer.write(processed);
+    return 0.0;
+  }
 
-    // Centroid X coordinate formula: X = M10 / M00
-  double lineCenterX = (m.m10 / m.m00) + x;
+    // Centroid of the largest line contour, in resized-frame coordinates.
+  cv::Point2d lineCentroid(m.m10 / m.m00, m.m01 / m.m00);
 
-    // 6. Calculate the error from the screen center
-  double screenCenterX = thresh.cols / 2.0;
-  double error = lineCenterX - screenCenterX;
+    // --- Green-weighted target point ---
+    // Distance (in resized-frame pixels) within which a detected green
+    // blob is considered close enough to the line's centroid to pull
+    // the target point toward it (e.g. rescue markers, junction markers).
+  const double greenDistThreshold = 150.0;
+    // Relative weighting of a qualifying green centroid versus the
+    // line contour's own centroid when averaging the target point.
+    // >1.0 means green contours are weighted more heavily than the line COM.
+  const double greenWeight = 25.0;
 
-  cv::Mat processed;
-  cv::cvtColor(thresh, processed, cv::COLOR_GRAY2BGR);
-  this->writer.write(processed);
+  std::vector<std::vector<cv::Point>> greenContours;
+  std::vector<cv::Point> greenCenters = this->extractGreen(resized, &greenContours);
+
+    // --- Draw green contours in green ---
+    // cv::drawContours(processed, greenContours, -1, cv::Scalar(0, 255, 0), 2);
+
+  if (greenCenters.size() >= 2) {
+    cv::Point p1 = greenCenters[0];
+    cv::Point p2 = greenCenters[1];
+
+    double angle = this->calculateAngle(p1, p2);
+    if (std::abs(angle) < 0.5 || std::abs(angle) > std::numbers::pi - 0.5) {
+      RCLCPP_INFO(this->get_logger(), "Starting double green");
+      this->sendMovementGoal(0, 100, 3.3);
+      this->state = GREEN_ROTATE;
+      RCLCPP_INFO(this->get_logger(), "Sent double green start message");
+      return 0;
+    }
+  }
+
+  cv::Point2d greenSum = cv::Point2d();
+  double totalWeight = 1.0;
+
+  for (const cv::Point & greenPoint : greenCenters) {
+    double dist = this->calculateDist(
+      greenPoint, cv::Point(static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)));
+
+      // Mark each green blob centre: yellow if it contributed to the
+      //   weighted target point, red if it was too far away and ignored.
+      // cv::Scalar markerColor = (dist <= greenDistThreshold) ?
+      //   cv::Scalar(0, 255, 255) :
+      //   cv::Scalar(0, 0, 255);
+      // cv::circle(processed, greenPoint, 6, markerColor, -1);
+
+    if (dist > greenDistThreshold) {
+      continue;
+    }
+
+    greenSum += greenWeight * (cv::Point2d(greenPoint.x, greenPoint.y) - lineCentroid);
+    totalWeight += greenWeight;
+  }
+
+  cv::Point2d targetPoint = lineCentroid + greenSum / totalWeight;
+
+    // --- COM annotations (resized-frame coordinates) ---
+    // Raw line centroid, before green-weighting: magenta.
+    // cv::circle(processed, cv::Point(
+    //     static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)),
+    //   8, cv::Scalar(255, 0, 255), -1);
+
+    // Final green-weighted target point: cyan circle + crosshair.
+  cv::Point targetPx(static_cast<int>(targetPoint.x), static_cast<int>(targetPoint.y));
+  // cv::circle(processed, targetPx, 10, cv::Scalar(255, 255, 0), 2);
+  // cv::drawMarker(processed, targetPx, cv::Scalar(255, 255, 0), cv::MARKER_CROSS, 20, 2);
+
+    // Undo the crop offset to bring the target point back into full-frame coordinates.
+  targetPoint.x += x;
+  targetPoint.y += y;
+
+    // 6. Stationary reference point: bottom-middle of the (uncropped) frame.
+  cv::Point2d stationaryPoint(frame.cols / 2.0, frame.rows);
+
+  double dx = targetPoint.x - stationaryPoint.x;
+  double dy = stationaryPoint.y - targetPoint.y;  // flip so "straight ahead" is positive dy
+
+    // Error is now the heading angle from the stationary point to the
+    // (green-weighted) target centroid, rather than a raw pixel offset.
+  double error = std::atan2(dx, dy);
+  double length = std::sqrt(dx * dx + dy * dy);
+  error *= length;
+
+  // this->writer.write(processed);
 
   return error;
-
 }
 
 void NavigationNode::simpleNavigation(cv::Mat & frame)
 {
   double error = this->simpleError(frame);
 
-  this->publishError(2 * error);
+  this->publishError(0.01 * error);
 }
 
 void NavigationNode::advancedNavigation(cv::Mat & frame)
@@ -315,10 +530,10 @@ cv::Mat NavigationNode::applyThreshold(cv::Mat & image, uint32_t threshSize, uin
   cvtColor(image, gray, cv::COLOR_BGR2GRAY);
   GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), 0);
 
-  cv::adaptiveThreshold(gray, binary, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C,
-                        cv::THRESH_BINARY_INV, threshSize, 4);
+  // cv::adaptiveThreshold(gray, binary, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C,
+  //                       cv::THRESH_BINARY_INV, threshSize, 4);
 
-  // cv::threshold(gray, binary, 120, 255, cv::THRESH_BINARY_INV);
+  cv::threshold(gray, binary, 120, 255, cv::THRESH_BINARY_INV);
   // binary = this->applySmoothVariableThreshold(gray);
 
   cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(kernelSize, kernelSize));
@@ -375,13 +590,15 @@ cv::Point NavigationNode::localToGlobalFrame(cv::Point point)
   return newCenter + cv::Point(rotatedX, rotatedY);
 }
 
-std::vector<cv::Point> NavigationNode::extractGreen(cv::Mat & image)
+std::vector<cv::Point> NavigationNode::extractGreen(
+  cv::Mat & image,
+  std::vector<std::vector<cv::Point>> * outContours)
 {
   cv::Mat hsv;
   cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
 
-  cv::Scalar lower_green(35, 40, 40);
-  cv::Scalar upper_green(85, 255, 255);
+  cv::Scalar lower_green(40, 40, 30);
+  cv::Scalar upper_green(100, 255, 255);
 
   cv::Mat mask;
   cv::inRange(hsv, lower_green, upper_green, mask);
@@ -396,10 +613,15 @@ std::vector<cv::Point> NavigationNode::extractGreen(cv::Mat & image)
 
   std::vector<cv::Point> centers;
 
+  std::sort(contours.begin(), contours.end(),
+    [](const std::vector<cv::Point> & a, const std::vector<cv::Point> & b) {
+      return cv::contourArea(a) > cv::contourArea(b);
+    });
+
   for (const auto & contour : contours) {
     double area = cv::contourArea(contour);
 
-    if (area <= 100) {
+    if (area <= 200) {
       continue;
     }
 
@@ -413,6 +635,10 @@ std::vector<cv::Point> NavigationNode::extractGreen(cv::Mat & image)
     int cY = static_cast<int>(m.m01 / m.m00);
 
     centers.push_back(cv::Point(cX, cY));
+
+    if (outContours) {
+      outContours->push_back(contour);
+    }
   }
 
   return centers;
