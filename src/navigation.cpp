@@ -66,6 +66,7 @@ NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
     {"advanced", NavigationType::ADVANCED}
   };
 
+
   auto it = nav_type_map.find(nav_type_str);
 
   if (it != nav_type_map.end()) {
@@ -513,7 +514,7 @@ void NavigationNode::simpleNavigation(cv::Mat & frame)
 
 void NavigationNode::advancedNavigation(cv::Mat & frame)
 {
-  cv::Mat processed = this->processImage(frame); \
+  cv::Mat processed = this->processImage(frame);
   this->skeletonizedImage = processed;
   this->extractNodes();
   this->extractEdges();
