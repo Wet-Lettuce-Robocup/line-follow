@@ -2,8 +2,7 @@ name: Mirror to Target Repo
 
 on:
   push:
-    branches: [ "**" ]
-  delete:
+    branches: [ "main" ]
   workflow_dispatch:
     inputs:
       logLevel:
@@ -16,9 +15,10 @@ jobs:
     if: github.repository == 'Wet-Lettuce-Robocup/line_follow'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: main
 
       - name: Test SSH Connection
         env:
@@ -32,12 +32,12 @@ jobs:
 
       - name: Push to Mirror Repo
         run: |
-          git fetch --all
-          # Replace with your actual target SSH URL
+          # Add the target remote
           git remote add mirror git@github.com:SGCS-SE/2026-at3-software-project-will-da-pro.git
           
           # Force Git to use the specific SSH key we just set up
           export GIT_SSH_COMMAND="ssh -i ~/.ssh/id_rsa"
           
-          # Push everything
-          git push --mirror mirror
+          # Push ONLY the main branch to line_follow_ros on the target repo
+          # --force ensures the target branch perfectly matches your source main branch
+          git push --force mirror main:line_follow_ros
