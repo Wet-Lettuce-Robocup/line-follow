@@ -164,8 +164,7 @@ private:
 
   std::vector<cv::Point> extractGreen(
     cv::Mat & image, std::vector<std::vector<cv::Point>> * greenContours);
-  std::vector<cv::Point> extractSilver(
-    cv::Mat & frame, std::vector<std::vector<cv::Point>> * silverContours);
+  bool detectRed(cv::Mat & image, cv::Mat & processed);
   void extractNodes();
   void extractEdges();
 

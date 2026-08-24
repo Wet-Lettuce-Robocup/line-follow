@@ -381,21 +381,13 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     return 0.0;
   }
 
-  std::vector<std::vector<cv::Point>> silverContours;
-  std::vector<cv::Point> silverCenters = this->extractSilver(resized, &silverContours);
+  // Detect red after confirming that line contours exist.
+  bool redDetected = this->detectRed(resized, processed);
 
-  for (size_t i = 0; i < silverContours.size(); i++) {
-    cv::drawContours(processed, silverContours, static_cast<int>(i), cv::Scalar(255, 255, 0), 2);
-
-    if (i < silverCenters.size()) {
-      cv::circle(processed, silverCenters[i], 5, cv::Scalar(200, 100, 0), -1);
-    }
-  }
-
-  if (!silverCenters.empty()) {
+  if (redDetected) {
     std_msgs::msg::Bool msg;
     msg.data = true;
-    RCLCPP_INFO(this->get_logger(), "Silver detected");
+    RCLCPP_INFO(this->get_logger(), "Silver (red contour) detected");
     lineCompletePub->publish(msg);
   }
 
@@ -659,114 +651,48 @@ std::vector<cv::Point> NavigationNode::extractGreen(
   return centers;
 }
 
-std::vector<cv::Point> NavigationNode::extractSilver(
-  cv::Mat & frame, std::vector<std::vector<cv::Point>> * silverContours)
+bool NavigationNode::detectRed(cv::Mat & image, cv::Mat & processed)
 {
-  std::vector<cv::Point> silverCenters;
-
-  if (frame.empty()) return silverCenters;
-
-  // 1. Convert BGR -> HSV
   cv::Mat hsv;
-  cv::cvtColor(frame, hsv, cv::COLOR_BGR2HSV);
+  cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
 
-  // 2. Threshold for reflective silver (low saturation, high brightness) - to tune
+  cv::Mat mask1;
+  cv::Mat mask2;
+  cv::Mat redMask;
 
-  cv::Mat silverMask;
+  cv::inRange(hsv, cv::Scalar(0, 100, 100), cv::Scalar(10, 255, 255), mask1);
 
-  cv::inRange(
-    hsv, cv::Scalar(0, 0, 40),  // H min, S min, V min
-    cv::Scalar(180, 120, 255),  // H max, S max, V max
-    silverMask);
+  cv::inRange(hsv, cv::Scalar(170, 100, 100), cv::Scalar(180, 255, 255), mask2);
 
-  // 3. Clean up the mask
-  cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(7, 3));
+  redMask = mask1 | mask2;
 
-  // Remove small isolated noise
-  cv::morphologyEx(silverMask, silverMask, cv::MORPH_OPEN, kernel);
+  cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
 
-  // Fill small gaps in the silver line
-  cv::morphologyEx(silverMask, silverMask, cv::MORPH_CLOSE, kernel);
+  cv::morphologyEx(redMask, redMask, cv::MORPH_OPEN, kernel);
 
-  // 4. Find contours
-  std::vector<std::vector<cv::Point>> contours;
+  std::vector<std::vector<cv::Point>> redContours;
 
-  cv::findContours(silverMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+  cv::findContours(redMask, redContours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-  // 5. Filter contours
-  for (const auto & contour : contours) {
-    // Minimum area
+  constexpr double minRedArea = 500.0;
+
+  bool redDetected = false;
+
+  for (const auto & contour : redContours) {
     double area = cv::contourArea(contour);
-
-    if (area < 6000) continue;
-
-    // Filter out small rectangles
-    cv::Rect bounding = cv::boundingRect(contour);
-
-    if (bounding.width < frame.cols * 0.70) continue;
-
-    if (bounding.height > frame.rows * 0.50) continue;
-
-    // Rotated bounding rectangle
-    cv::RotatedRect rotatedRect = cv::minAreaRect(contour);
-
-    float width = rotatedRect.size.width;
-    float height = rotatedRect.size.height;
-
-    float angle = rotatedRect.angle;
-
-    if (width < height) {
-      std::swap(width, height);
-      angle += 90.0f;
+    RCLCPP_INFO(this->get_logger(), "area: %d", area);
+    if (area < minRedArea) {
+      continue;
     }
 
-    while (angle > 90.0f) angle -= 180.0f;
+    redDetected = true;
 
-    while (angle < -90.0f) angle += 180.0f;
+    // Draw the red region onto processed.
+    cv::drawContours(
+      processed, std::vector<std::vector<cv::Point>>{contour}, -1, cv::Scalar(0, 0, 255), -1);
 
-    if (std::abs(angle) > 10.0f) continue;
-
-    double aspectRatio = static_cast<double>(width) / static_cast<double>(height);
-
-    if (aspectRatio < 5.0) continue;
-
-    cv::Point2f corners[4];
-    rotatedRect.points(corners);
-
-    float minX = corners[0].x;
-    float maxX = corners[0].x;
-
-    for (int i = 1; i < 4; i++) {
-      minX = std::min(minX, corners[i].x);
-      maxX = std::max(maxX, corners[i].x);
-    }
-
-    // Allow a small tolerance because of anti-aliasing etc.
-    constexpr float EDGE_TOLERANCE = 10.0f;
-
-    bool touchesLeft = minX <= EDGE_TOLERANCE;
-
-    bool touchesRight = maxX >= frame.cols - EDGE_TOLERANCE;
-
-    if (!touchesLeft || !touchesRight) continue;
-
-    // Calculate contour centre
-    cv::Moments moments = cv::moments(contour);
-
-    if (moments.m00 == 0) continue;
-
-    int cx = static_cast<int>(moments.m10 / moments.m00);
-    int cy = static_cast<int>(moments.m01 / moments.m00);
-
-    // Save centre & contour
-    silverCenters.emplace_back(cx, cy);
-
-    if (silverContours != nullptr) {
-      silverContours->push_back(contour);
-    }
+    return redDetected;
   }
-
-  return silverCenters;
 }
 
 cv::Point NavigationNode::cvtPoint(cv::Mat & src, cv::Mat & dst, cv::Point point)
