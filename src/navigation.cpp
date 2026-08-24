@@ -680,7 +680,7 @@ bool NavigationNode::detectRed(cv::Mat & image, cv::Mat & processed)
 
   for (const auto & contour : redContours) {
     double area = cv::contourArea(contour);
-    RCLCPP_INFO(this->get_logger(), "area: %d", area);
+    RCLCPP_INFO(this->get_logger(), "area: %.2f", area);
     if (area < minRedArea) {
       continue;
     }
@@ -690,9 +690,8 @@ bool NavigationNode::detectRed(cv::Mat & image, cv::Mat & processed)
     // Draw the red region onto processed.
     cv::drawContours(
       processed, std::vector<std::vector<cv::Point>>{contour}, -1, cv::Scalar(0, 0, 255), -1);
-
-    return redDetected;
   }
+  return redDetected;
 }
 
 cv::Point NavigationNode::cvtPoint(cv::Mat & src, cv::Mat & dst, cv::Point point)
