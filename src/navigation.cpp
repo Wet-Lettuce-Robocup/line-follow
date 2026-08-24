@@ -97,7 +97,7 @@ CallbackReturn NavigationNode::on_configure(const rclcpp_lifecycle::State &)
   auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort();
 
   this->errorPub = this->create_publisher<std_msgs::msg::Float64>("line_error", 10);
-  this->lineCompletePub = this->create_publisher<std_msgs::msg::Bool>("rescue_active", 10);
+  this->lineCompletePub = this->create_publisher<std_msgs::msg::Bool>("/rescue_active", 10);
   this->imageSub = this->create_subscription<sensor_msgs::msg::Image>(
     "/down_camera/camera_node/image_raw", qos, std::bind(&NavigationNode::imageCallback, this, _1));
   this->odomSub = this->create_subscription<nav_msgs::msg::Odometry>(
@@ -674,13 +674,13 @@ bool NavigationNode::detectRed(cv::Mat & image, cv::Mat & processed)
 
   cv::findContours(redMask, redContours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-  constexpr double minRedArea = 500.0;
+  constexpr double minRedArea = 3000.0;
 
   bool redDetected = false;
 
   for (const auto & contour : redContours) {
     double area = cv::contourArea(contour);
-    RCLCPP_INFO(this->get_logger(), "area: %.2f", area);
+    // RCLCPP_INFO(this->get_logger(), "area: %f", area);
     if (area < minRedArea) {
       continue;
     }
