@@ -15,40 +15,41 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <opencv2/opencv.hpp>
 #include <rclcpp/publisher.hpp>
 #include <rclcpp/subscription.hpp>
-#include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <rclcpp_lifecycle/lifecycle_node.hpp>
+
 #include "nav_msgs/msg/odometry.hpp"
+#include <nav_msgs/msg/odometry.hpp>
+#include <robot_msgs/action/move_time.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
-#include <opencv2/opencv.hpp>
-#include <nav_msgs/msg/odometry.hpp>
-#include <robot_msgs/action/move_time.hpp>
 
 struct Node
 {
   int id;
-  cv::Point pos; // averaged position after merging
+  cv::Point pos;  // averaged position after merging
   bool is_endpoint;
   bool screen_edge;
 };
 
 struct Edge
 {
-  int src, dst;                // node IDs
-  std::vector<cv::Point> path; // pixel chain along the skeleton
-  double length;               // Euclidean arc length
+  int src, dst;                 // node IDs
+  std::vector<cv::Point> path;  // pixel chain along the skeleton
+  double length;                // Euclidean arc length
 
   bool operator==(const Edge & other) const
   {
-    return (src == other.src && dst == other.dst) ||
-           (src == other.dst && dst == other.src);
+    return (src == other.src && dst == other.dst) || (src == other.dst && dst == other.src);
   }
 };
 
-class Graph {
+class Graph
+{
 public:
   std::vector<Node> nodes;
   std::vector<Edge> edges;
@@ -59,7 +60,9 @@ public:
   std::vector<Edge *> getConnectedEdges(int nodeID);
 };
 
-struct LocalEdge : Edge {};
+struct LocalEdge : Edge
+{
+};
 
 struct TrackedNode : Node
 {
@@ -76,13 +79,14 @@ struct TrackedEdge : Edge
   double angleFromDst;
 };
 
-class TrackedGraph {
+class TrackedGraph
+{
 public:
   std::vector<TrackedNode> nodes;
   std::vector<TrackedEdge> edges;
 
   int nextID = 0;
-  int edgePenalty = 0; // TODO Change later once edge detection exists
+  int edgePenalty = 0;  // TODO Change later once edge detection exists
 
   TrackedNode * nodeFromID(int id);
   std::vector<TrackedEdge *> getConnectedEdges(int nodeID);
@@ -90,14 +94,9 @@ public:
   std::vector<std::vector<double>> getCostMatrix(Graph & graph);
 };
 
-enum NavigationType
-{
-  SIMPLE,
-  ADVANCED
-};
+enum NavigationType { SIMPLE, ADVANCED };
 
-enum LineFollowState
-{
+enum LineFollowState {
   FOLLOWING,
   TOWER_ROTATE_START,
   TOWER_MOVE,
@@ -107,9 +106,19 @@ enum LineFollowState
   COMPLETE
 };
 
+// Decision made when the simple line-follower reaches an intersection and
+// looks at where the green markers sit relative to it.
+enum class GreenTurnDirection {
+  NONE,    // no (valid) green found -> keep following the line straight through
+  LEFT,    // one green marker, on the left
+  RIGHT,   // one green marker, on the right
+  REVERSE  // two green markers -> dead end, turn around 180
+};
+
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
-class NavigationNode : public rclcpp_lifecycle::LifecycleNode {
+class NavigationNode : public rclcpp_lifecycle::LifecycleNode
+{
 public:
   explicit NavigationNode(const rclcpp::NodeOptions & options);
 
@@ -147,9 +156,6 @@ private:
   void odomCallback(nav_msgs::msg::Odometry::SharedPtr msg);
   void goalResponseCallback(
     const rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::SharedPtr & goalHandle);
-  void goalFeedbackCallback(
-    rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::SharedPtr,
-    const std::shared_ptr<const robot_msgs::action::MoveTime::Feedback> feedback);
   void goalResultCallback(
     const rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::WrappedResult & result);
   double simpleError(const cv::Mat & frame);
@@ -163,8 +169,7 @@ private:
   cv::Point localToGlobalFrame(cv::Point point);
 
   std::vector<cv::Point> extractGreen(
-    cv::Mat & image,
-    std::vector<std::vector<cv::Point>> * greenContours);
+    cv::Mat & image, std::vector<std::vector<cv::Point>> * outContours = nullptr);
   void extractNodes();
   void extractEdges();
 
@@ -189,14 +194,47 @@ private:
   double wrapAngle(double angle);
   double addAngles(double angle1, double angle2);
 
-  void findStartingEdge(int & trackingID, TrackedEdge **currentEdge);
-  void findNextTarget(int & trackingID, TrackedEdge **currentEdge);
+  void findStartingEdge(int & trackingID, TrackedEdge ** currentEdge);
+  void findNextTarget(int & trackingID, TrackedEdge ** currentEdge);
   TrackedEdge * closestToAngle(
-    int currentNode,
-    std::vector<TrackedEdge *> currentEdges,
-    double targetAngle);
+    int currentNode, std::vector<TrackedEdge *> currentEdges, double targetAngle);
 
   double searchDistance(cv::Point point);
+
+  // --- Simple line-follower (skeleton walk + intersection/green handling) ---
+  // Given the junction point where the forward walk along the skeleton
+  // stopped, and the heading direction the walk was travelling in when it
+  // got there, classify the green markers found near that junction and
+  // decide whether/where to turn. Markers further than a fixed radius from
+  // the junction are ignored, as are markers that project *ahead* of the
+  // junction along headingDir (i.e. sit beyond the crossing line, on the
+  // far/exit side) -- only markers at or before the junction count.
+  // usedGreenOut, if provided, is filled with the markers that were
+  // actually counted (for debug drawing).
+  GreenTurnDirection evaluateIntersectionGreen(
+    const cv::Point & junctionCentre, const cv::Point2d & headingDir,
+    const std::vector<cv::Point> & greenPoints, std::vector<cv::Point> * usedGreenOut);
+
+  // Kicks off the physical turn for a decision made by
+  // evaluateIntersectionGreen(), reusing the existing GREEN_ROTATE /
+  // GREEN_MOVE_FORWARD state machine driven from goalResultCallback().
+  void triggerGreenTurn(GreenTurnDirection direction);
+
+  // Frame-to-frame tracking for the simple line-follower: where the
+  // skeleton walk ended last frame, and which direction it was heading in
+  // when it stopped. Used to keep the "which way is forward" decision
+  // stable across frames instead of it being recomputed from nothing each
+  // time, which is what caused misbehaviour approaching intersections at
+  // an angle.
+  cv::Point prevForwardEndpoint;
+  bool havePrevForwardEndpoint = false;
+  cv::Point2d prevHeadingDir{0, -1};
+  bool havePrevHeading = false;
+
+  // Angular velocity / duration for the in-progress green-marker turn,
+  // set by triggerGreenTurn() and consumed by goalResultCallback().
+  double turnAngularVel = 0.0;
+  double turnDuration = 0.0;
 
   cv::Mat rawImage;
   cv::Mat skeletonizedImage;
@@ -206,7 +244,7 @@ private:
   std::vector<cv::Point> green;
 
   int currentTarget = -1;
-  TrackedEdge *currentEdge = nullptr;
+  TrackedEdge * currentEdge = nullptr;
 
   double x = 0;
   double y = 0;
