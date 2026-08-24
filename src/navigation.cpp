@@ -385,16 +385,16 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   std::vector<cv::Point> silverCenters = this->extractSilver(resized, &silverContours);
 
   for (size_t i = 0; i < silverContours.size(); i++) {
-    cv::drawContours(debug, silverContours, static_cast<int>(i), cv::Scalar(0, 255, 0), 2);
+    cv::drawContours(processed, silverContours, static_cast<int>(i), cv::Scalar(0, 255, 0), 2);
 
     if (i < silverCenters.size()) {
-      cv::circle(debug, silverCenters[i], 5, cv::Scalar(0, 0, 255), -1);
+      cv::circle(processed, silverCenters[i], 5, cv::Scalar(0, 0, 255), -1);
     }
   }
 
   if (!silverCenters.empty()) {
     std_msgs::msg::Bool msg;
-    msg.data = True;
+    msg.data = true;
     lineCompletePub->publish(msg);
   }
 
@@ -659,7 +659,7 @@ std::vector<cv::Point> NavigationNode::extractGreen(
 }
 
 std::vector<cv::Point> NavigationNode::extractSilver(
-  const cv::Mat & frame, std::vector<std::vector<cv::Point>> * silverContours)
+  cv::Mat & frame, std::vector<std::vector<cv::Point>> * silverContours)
 {
   std::vector<cv::Point> silverCenters;
 
