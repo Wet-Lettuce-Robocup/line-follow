@@ -15,40 +15,41 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <opencv2/opencv.hpp>
 #include <rclcpp/publisher.hpp>
 #include <rclcpp/subscription.hpp>
-#include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <rclcpp_lifecycle/lifecycle_node.hpp>
+
 #include "nav_msgs/msg/odometry.hpp"
+#include <nav_msgs/msg/odometry.hpp>
+#include <robot_msgs/action/move_time.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
-#include <opencv2/opencv.hpp>
-#include <nav_msgs/msg/odometry.hpp>
-#include <robot_msgs/action/move_time.hpp>
 
 struct Node
 {
   int id;
-  cv::Point pos; // averaged position after merging
+  cv::Point pos;  // averaged position after merging
   bool is_endpoint;
   bool screen_edge;
 };
 
 struct Edge
 {
-  int src, dst;                // node IDs
-  std::vector<cv::Point> path; // pixel chain along the skeleton
-  double length;               // Euclidean arc length
+  int src, dst;                 // node IDs
+  std::vector<cv::Point> path;  // pixel chain along the skeleton
+  double length;                // Euclidean arc length
 
   bool operator==(const Edge & other) const
   {
-    return (src == other.src && dst == other.dst) ||
-           (src == other.dst && dst == other.src);
+    return (src == other.src && dst == other.dst) || (src == other.dst && dst == other.src);
   }
 };
 
-class Graph {
+class Graph
+{
 public:
   std::vector<Node> nodes;
   std::vector<Edge> edges;
@@ -59,7 +60,9 @@ public:
   std::vector<Edge *> getConnectedEdges(int nodeID);
 };
 
-struct LocalEdge : Edge {};
+struct LocalEdge : Edge
+{
+};
 
 struct TrackedNode : Node
 {
@@ -76,13 +79,14 @@ struct TrackedEdge : Edge
   double angleFromDst;
 };
 
-class TrackedGraph {
+class TrackedGraph
+{
 public:
   std::vector<TrackedNode> nodes;
   std::vector<TrackedEdge> edges;
 
   int nextID = 0;
-  int edgePenalty = 0; // TODO Change later once edge detection exists
+  int edgePenalty = 0;  // TODO Change later once edge detection exists
 
   TrackedNode * nodeFromID(int id);
   std::vector<TrackedEdge *> getConnectedEdges(int nodeID);
@@ -90,14 +94,9 @@ public:
   std::vector<std::vector<double>> getCostMatrix(Graph & graph);
 };
 
-enum NavigationType
-{
-  SIMPLE,
-  ADVANCED
-};
+enum NavigationType { SIMPLE, ADVANCED };
 
-enum LineFollowState
-{
+enum LineFollowState {
   FOLLOWING,
   TOWER_ROTATE_START,
   TOWER_MOVE,
@@ -109,7 +108,8 @@ enum LineFollowState
 
 using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
-class NavigationNode : public rclcpp_lifecycle::LifecycleNode {
+class NavigationNode : public rclcpp_lifecycle::LifecycleNode
+{
 public:
   explicit NavigationNode(const rclcpp::NodeOptions & options);
 
@@ -163,8 +163,9 @@ private:
   cv::Point localToGlobalFrame(cv::Point point);
 
   std::vector<cv::Point> extractGreen(
-    cv::Mat & image,
-    std::vector<std::vector<cv::Point>> * greenContours);
+    cv::Mat & image, std::vector<std::vector<cv::Point>> * greenContours);
+  std::vector<cv::Point> extractSilver(
+    cv::Mat & frame, std::vector<std::vector<cv::Point>> * silverContours);
   void extractNodes();
   void extractEdges();
 
@@ -189,12 +190,10 @@ private:
   double wrapAngle(double angle);
   double addAngles(double angle1, double angle2);
 
-  void findStartingEdge(int & trackingID, TrackedEdge **currentEdge);
-  void findNextTarget(int & trackingID, TrackedEdge **currentEdge);
+  void findStartingEdge(int & trackingID, TrackedEdge ** currentEdge);
+  void findNextTarget(int & trackingID, TrackedEdge ** currentEdge);
   TrackedEdge * closestToAngle(
-    int currentNode,
-    std::vector<TrackedEdge *> currentEdges,
-    double targetAngle);
+    int currentNode, std::vector<TrackedEdge *> currentEdges, double targetAngle);
 
   double searchDistance(cv::Point point);
 
@@ -206,7 +205,7 @@ private:
   std::vector<cv::Point> green;
 
   int currentTarget = -1;
-  TrackedEdge *currentEdge = nullptr;
+  TrackedEdge * currentEdge = nullptr;
 
   double x = 0;
   double y = 0;
