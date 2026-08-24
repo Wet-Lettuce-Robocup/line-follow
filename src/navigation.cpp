@@ -697,23 +697,57 @@ std::vector<cv::Point> NavigationNode::extractSilver(
     // Minimum area
     double area = cv::contourArea(contour);
 
-    if (area < 100) continue;
+    if (area < 8000) continue;
 
-    // Bounding rectangle
-    cv::Rect rect = cv::boundingRect(contour);
+    // Filter out small rectangles
+    cv::Rect bounding = cv::boundingRect(contour);
 
-    // Must extend almost completely across the image
-    if (rect.x > 2) continue;
+    if (bounding.width < frame.cols * 0.90) continue;
 
-    if (rect.x + rect.width < frame.cols - 2) continue;
+    if (bounding.height > frame.rows * 0.40) continue;
 
-    // Must be relatively thin vertically
-    if (rect.height > frame.rows * 0.15) continue;
+    // Rotated bounding rectangle
+    cv::RotatedRect rotatedRect = cv::minAreaRect(contour);
 
-    // Must have a high width/height ratio
-    double aspectRatio = static_cast<double>(rect.width) / static_cast<double>(rect.height);
+    float width = rotatedRect.size.width;
+    float height = rotatedRect.size.height;
+
+    float angle = rotatedRect.angle;
+
+    if (width < height) {
+      std::swap(width, height);
+      angle += 90.0f;
+    }
+
+    while (angle > 90.0f) angle -= 180.0f;
+
+    while (angle < -90.0f) angle += 180.0f;
+
+    if (std::abs(angle) > 10.0f) continue;
+
+    double aspectRatio = static_cast<double>(width) / static_cast<double>(height);
 
     if (aspectRatio < 5.0) continue;
+
+    cv::Point2f corners[4];
+    rotatedRect.points(corners);
+
+    float minX = corners[0].x;
+    float maxX = corners[0].x;
+
+    for (int i = 1; i < 4; i++) {
+      minX = std::min(minX, corners[i].x);
+      maxX = std::max(maxX, corners[i].x);
+    }
+
+    // Allow a small tolerance because of anti-aliasing etc.
+    constexpr float EDGE_TOLERANCE = 10.0f;
+
+    bool touchesLeft = minX <= EDGE_TOLERANCE;
+
+    bool touchesRight = maxX >= frame.cols - EDGE_TOLERANCE;
+
+    if (!touchesLeft || !touchesRight) continue;
 
     // Calculate contour centre
     cv::Moments moments = cv::moments(contour);
