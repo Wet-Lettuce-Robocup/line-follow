@@ -517,7 +517,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
 
   this->writer.write(processed);
   cv::imshow("b", processed);
-  cv::waitKey(0);
+  cv::waitKey(1);
 
   return error;
 }
