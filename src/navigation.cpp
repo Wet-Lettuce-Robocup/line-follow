@@ -388,7 +388,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     cv::drawContours(processed, silverContours, static_cast<int>(i), cv::Scalar(255, 255, 0), 2);
 
     if (i < silverCenters.size()) {
-      cv::circle(processed, silverCenters[i], 5, cv::Scalar(255, 0, 255), -1);
+      cv::circle(processed, silverCenters[i], 5, cv::Scalar(200, 100, 0), -1);
     }
   }
 
@@ -675,8 +675,8 @@ std::vector<cv::Point> NavigationNode::extractSilver(
   cv::Mat silverMask;
 
   cv::inRange(
-    hsv, cv::Scalar(0, 0, 170),  // H min, S min, V min
-    cv::Scalar(180, 80, 255),    // H max, S max, V max
+    hsv, cv::Scalar(0, 0, 40),  // H min, S min, V min
+    cv::Scalar(180, 120, 255),  // H max, S max, V max
     silverMask);
 
   // 3. Clean up the mask
@@ -698,14 +698,14 @@ std::vector<cv::Point> NavigationNode::extractSilver(
     // Minimum area
     double area = cv::contourArea(contour);
 
-    if (area < 8000) continue;
+    if (area < 6000) continue;
 
     // Filter out small rectangles
     cv::Rect bounding = cv::boundingRect(contour);
 
-    if (bounding.width < frame.cols * 0.90) continue;
+    if (bounding.width < frame.cols * 0.70) continue;
 
-    if (bounding.height > frame.rows * 0.40) continue;
+    if (bounding.height > frame.rows * 0.50) continue;
 
     // Rotated bounding rectangle
     cv::RotatedRect rotatedRect = cv::minAreaRect(contour);
