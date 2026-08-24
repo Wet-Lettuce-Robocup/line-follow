@@ -531,7 +531,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     }
   }
 
-  cv::polylines(processed, path, false, cv::Scalar(0, 0, 0), 2);
+  cv::polylines(processed, path, false, cv::Scalar(0, 140, 255), 2);
   cv::circle(processed, walkStart, 6, cv::Scalar(255, 0, 0), -1);
   cv::circle(processed, targetPoint, 10, cv::Scalar(255, 255, 0), 2);
   cv::drawMarker(processed, targetPoint, cv::Scalar(255, 255, 0), cv::MARKER_CROSS, 20, 2);
