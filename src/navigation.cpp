@@ -515,6 +515,8 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   error *= length;
 
   this->writer.write(processed);
+  cv::imshow("b", processed);
+  cv::waitKey(0);
 
   return error;
 }
@@ -656,7 +658,7 @@ std::vector<cv::Point> NavigationNode::extractGreen(
   return centers;
 }
 
-std::vector<cv::Point> Vision::extractSilver(
+std::vector<cv::Point> NavigationNode::extractSilver(
   const cv::Mat & frame, std::vector<std::vector<cv::Point>> * silverContours)
 {
   std::vector<cv::Point> silverCenters;
