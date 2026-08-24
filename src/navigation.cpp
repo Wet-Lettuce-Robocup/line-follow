@@ -16,27 +16,31 @@
  */
 
 #include "line_follow/navigation.hpp"
+
+#include <cv_bridge/cv_bridge.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/opencv.hpp>
 #include <opencv2/videoio.hpp>
 #include <opencv2/ximgproc.hpp>
-#include <rclcpp/rclcpp.hpp>
 #include <rclcpp/qos.hpp>
+#include <rclcpp/rclcpp.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
+
 #include "nav_msgs/msg/odometry.hpp"
 #include "robot_msgs/action/move_time.hpp"
 #include <lifecycle_msgs/msg/state.hpp>
+#include <std_msgs/msg/float64.hpp>
+
+#include <Hungarian.h>
+
 #include <chrono>
 #include <cstdint>
 #include <functional>
-#include <unordered_map>
-#include <cv_bridge/cv_bridge.hpp>
-#include <std_msgs/msg/float64.hpp>
 #include <numbers>
+#include <unordered_map>
 #include <vector>
-#include <Hungarian.h>
 
 using std::placeholders::_1;
 using std::placeholders::_2;
@@ -62,10 +66,7 @@ NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
   std::string nav_type_str = this->get_parameter("navigation_type").as_string();
 
   static const std::unordered_map<std::string, NavigationType> nav_type_map = {
-    {"simple", NavigationType::SIMPLE},
-    {"advanced", NavigationType::ADVANCED}
-  };
-
+    {"simple", NavigationType::SIMPLE}, {"advanced", NavigationType::ADVANCED}};
 
   auto it = nav_type_map.find(nav_type_str);
 
@@ -80,13 +81,12 @@ NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
   cv::Size frameSize = cv::Size(854, 480);
   double fps = 30.0;
 
-  this->writer = cv::VideoWriter("/videos/output.mp4", fourcc,
-    fps,
-    frameSize);
+  this->writer = cv::VideoWriter("/videos/output.mp4", fourcc, fps, frameSize);
 
   if (!this->writer.isOpened()) {
     RCLCPP_ERROR(this->get_logger(), "CRITICAL ERROR: VideoWriter failed to initiate!");
-    RCLCPP_ERROR(this->get_logger(), "Check 1: Does OpenCV have FFMPEG? Build Info: %s",
+    RCLCPP_ERROR(
+      this->get_logger(), "Check 1: Does OpenCV have FFMPEG? Build Info: %s",
       cv::getBuildInformation().c_str());
   }
 }
@@ -98,18 +98,16 @@ CallbackReturn NavigationNode::on_configure(const rclcpp_lifecycle::State &)
 
   this->errorPub = this->create_publisher<std_msgs::msg::Float64>("line_error", 10);
   this->lineCompletePub = this->create_publisher<std_msgs::msg::Bool>("rescue_active", 10);
-  this->imageSub =
-    this->create_subscription<sensor_msgs::msg::Image>("/down_camera/camera_node/image_raw", qos,
-    std::bind(&NavigationNode::imageCallback, this, _1));
-  this->odomSub =
-    this->create_subscription<nav_msgs::msg::Odometry>("/odom", 10,
-    std::bind(&NavigationNode::odomCallback, this, _1));
+  this->imageSub = this->create_subscription<sensor_msgs::msg::Image>(
+    "/down_camera/camera_node/image_raw", qos, std::bind(&NavigationNode::imageCallback, this, _1));
+  this->odomSub = this->create_subscription<nav_msgs::msg::Odometry>(
+    "/odom", 10, std::bind(&NavigationNode::odomCallback, this, _1));
 
   timer_ = this->create_wall_timer(33ms, std::bind(&NavigationNode::timerCallback, this));
   timer_->cancel();
   this->actionClient = rclcpp_action::create_client<robot_msgs::action::MoveTime>(
-      this,
-      "/move_time" // Must match the server's action name
+    this,
+    "/move_time"  // Must match the server's action name
   );
 
   return CallbackReturn::SUCCESS;
@@ -153,8 +151,7 @@ CallbackReturn NavigationNode::on_shutdown(const rclcpp_lifecycle::State &)
 TrackedNode::TrackedNode(cv::Point pos)
 {
   float dt = 1.0f;
-  kf.transitionMatrix = (cv::Mat_<float>(4, 4) << 1, 0, dt, 0, 0, 1, 0, dt, 0,
-    0, 1, 0, 0, 0, 0, 1);
+  kf.transitionMatrix = (cv::Mat_<float>(4, 4) << 1, 0, dt, 0, 0, 1, 0, dt, 0, 0, 1, 0, 0, 0, 0, 1);
 
   kf.measurementMatrix = (cv::Mat_<float>(2, 4) << 1, 0, 0, 0, 0, 1, 0, 0);
 
@@ -164,10 +161,10 @@ TrackedNode::TrackedNode(cv::Point pos)
 
   cv::setIdentity(kf.errorCovPost, cv::Scalar::all(1));
 
-  kf.statePost.at<float>(1) = pos.x; // Initial X
-  kf.statePost.at<float>(1) = pos.y; // Initial Y
-  kf.statePost.at<float>(2) = 0.0f;  // Initial velocity X
-  kf.statePost.at<float>(3) = 0.0f;  // Initial velocity Y
+  kf.statePost.at<float>(1) = pos.x;  // Initial X
+  kf.statePost.at<float>(1) = pos.y;  // Initial Y
+  kf.statePost.at<float>(2) = 0.0f;   // Initial velocity X
+  kf.statePost.at<float>(3) = 0.0f;   // Initial velocity Y
 
   this->pos = pos;
 }
@@ -188,10 +185,9 @@ void NavigationNode::sendMovementGoal(double vel, double angular_vel, double tim
 
   sendGoalOptions.goal_response_callback =
     std::bind(&NavigationNode::goalResponseCallback, this, _1);
-  sendGoalOptions.feedback_callback = std::bind(&NavigationNode::goalFeedbackCallback, this, _1,
-    _2);
-  sendGoalOptions.result_callback =
-    std::bind(&NavigationNode::goalResultCallback, this, _1);
+  sendGoalOptions.feedback_callback =
+    std::bind(&NavigationNode::goalFeedbackCallback, this, _1, _2);
+  sendGoalOptions.result_callback = std::bind(&NavigationNode::goalResultCallback, this, _1);
 
   this->actionClient->async_send_goal(goalMsg, sendGoalOptions);
 }
@@ -208,7 +204,9 @@ void NavigationNode::goalResponseCallback(
 
 void NavigationNode::goalFeedbackCallback(
   rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::SharedPtr,
-  const std::shared_ptr<const robot_msgs::action::MoveTime::Feedback> _) {}
+  const std::shared_ptr<const robot_msgs::action::MoveTime::Feedback> _)
+{
+}
 
 void NavigationNode::goalResultCallback(
   const rclcpp_action::ClientGoalHandle<robot_msgs::action::MoveTime>::WrappedResult & result)
@@ -259,8 +257,7 @@ std::vector<std::vector<double>> TrackedGraph::getCostMatrix(Graph & graph)
   // TODO apply kalman filter
 
   // The vector must be square
-  int size = this->nodes.size() > graph.nodes.size() ? this->nodes.size() :
-    graph.nodes.size();
+  int size = this->nodes.size() > graph.nodes.size() ? this->nodes.size() : graph.nodes.size();
 
   std::vector<std::vector<double>> costs(size, std::vector(size, 0.0));
 
@@ -270,12 +267,11 @@ std::vector<std::vector<double>> TrackedGraph::getCostMatrix(Graph & graph)
       Node & trackedNode = this->nodes[i];
 
       double distance = cv::norm(trackedNode.pos - newNode.pos);
-      int connectedEdgeDiff = graph.getConnectedEdges(newNode.id).size() -
-        this->getConnectedEdges(trackedNode.id).size();
+      int connectedEdgeDiff =
+        graph.getConnectedEdges(newNode.id).size() - this->getConnectedEdges(trackedNode.id).size();
 
-      double penalty = trackedNode.screen_edge ?
-        0 :
-        this->edgePenalty * std::abs(connectedEdgeDiff);
+      double penalty =
+        trackedNode.screen_edge ? 0 : this->edgePenalty * std::abs(connectedEdgeDiff);
 
       double cost = distance + penalty;
       costs[i][j] = cost;
@@ -308,19 +304,21 @@ void NavigationNode::timerCallback()
 {
   switch (this->state) {
     case FOLLOWING: {
-        if (this->currentFrame.empty()) {return;}
-
-        switch (this->navigationType) {
-          case NavigationType::SIMPLE:
-            this->simpleNavigation(this->currentFrame);
-            break;
-          case NavigationType::ADVANCED:
-            this->advancedNavigation(this->currentFrame);
-            break;
-        }
-
-        break;
+      if (this->currentFrame.empty()) {
+        return;
       }
+
+      switch (this->navigationType) {
+        case NavigationType::SIMPLE:
+          this->simpleNavigation(this->currentFrame);
+          break;
+        case NavigationType::ADVANCED:
+          this->advancedNavigation(this->currentFrame);
+          break;
+      }
+
+      break;
+    }
     case TOWER_ROTATE_START:
       break;
     case TOWER_MOVE:
@@ -355,11 +353,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   int newWidth = static_cast<int>(frame.cols * 0.8);
   int newHeight = static_cast<int>(frame.rows * 0.6);
 
-    // 2. Calculate coordinates to center the crop box
+  // 2. Calculate coordinates to center the crop box
   int x = (frame.cols - newWidth) / 2;
   int y = (frame.rows - newHeight) / 2;
 
-    // 3. Define the Region of Interest (ROI) and crop
+  // 3. Define the Region of Interest (ROI) and crop
   cv::Rect roi(x, y, newWidth, newHeight);
   cv::Mat croppedImg = frame(roi);
 
@@ -368,22 +366,39 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   cv::resize(croppedImg, resized, dsize);
 
   cv::Mat thresh = this->applyThreshold(resized, 255, 35);
-    // 3. Find contours
+  // 3. Find contours
   std::vector<std::vector<cv::Point>> contours;
   cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-    // Annotated frame that gets written to the output video. Built on top of
-    // the color resized image (not the binary threshold mask) so contours,
-    // COM markers, and green blobs are all visible in color.
-    // cv::Mat processed = resized.clone();
+  // Annotated frame that gets written to the output video. Built on top of
+  // the color resized image (not the binary threshold mask) so contours,
+  // COM markers, and green blobs are all visible in color.
+  cv::Mat processed = resized.clone();
 
-    // If no contours are found, return 0 error
+  // If no contours are found, return 0 error
   if (contours.empty()) {
-    // this->writer.write(processed);
+    this->writer.write(processed);
     return 0.0;
   }
 
-    // 4. Find the largest contour (assuming this is our line)
+  std::vector<std::vector<cv::Point>> silverContours;
+  std::vector<cv::Point> silverCenters = this->extractSilver(resized, &silverContours);
+
+  for (size_t i = 0; i < silverContours.size(); i++) {
+    cv::drawContours(debug, silverContours, static_cast<int>(i), cv::Scalar(0, 255, 0), 2);
+
+    if (i < silverCenters.size()) {
+      cv::circle(debug, silverCenters[i], 5, cv::Scalar(0, 0, 255), -1);
+    }
+  }
+
+  if (!silverCenters.empty()) {
+    std_msgs::msg::Bool msg;
+    msg.data = True;
+    lineCompletePub->publish(msg);
+  }
+
+  // 4. Find the largest contour (assuming this is our line)
   size_t largestContourIdx = 0;
   double maxArea = 0.0;
   for (size_t i = 0; i < contours.size(); ++i) {
@@ -394,59 +409,59 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     }
   }
 
-    // --- Draw all detected line contours in black ---
-    // Every contour thin, the one we believe is the actual line drawn
-    // thicker so it stands out.
-    // cv::drawContours(processed, contours, -1, cv::Scalar(0, 0, 0), 1);
-    // cv::drawContours(processed, contours, static_cast<int>(largestContourIdx),
-    //   cv::Scalar(0, 0, 0), 3);
+  // --- Draw all detected line contours in black ---
+  // Every contour thin, the one we believe is the actual line drawn
+  // thicker so it stands out.
+  cv::drawContours(processed, contours, -1, cv::Scalar(0, 0, 0), 1);
+  cv::drawContours(
+    processed, contours, static_cast<int>(largestContourIdx), cv::Scalar(0, 0, 0), 3);
 
-    // Optional: Filter out tiny noise
+  // Optional: Filter out tiny noise
   if (maxArea < 100.0) {
-    // this->writer.write(processed);
+    this->writer.write(processed);
     return 0.0;
   }
 
-    // 5. Calculate the Center of Mass (Centroid) using Moments
+  // 5. Calculate the Center of Mass (Centroid) using Moments
   cv::Moments m = cv::moments(contours[largestContourIdx]);
 
-    // Prevent division by zero
+  // Prevent division by zero
   if (m.m00 == 0) {
-    // this->writer.write(processed);
+    this->writer.write(processed);
     return 0.0;
   }
 
-    // Centroid of the largest line contour, in resized-frame coordinates.
+  // Centroid of the largest line contour, in resized-frame coordinates.
   cv::Point2d lineCentroid(m.m10 / m.m00, m.m01 / m.m00);
 
-    // --- Green-weighted target point ---
-    // Distance (in resized-frame pixels) within which a detected green
-    // blob is considered close enough to the line's centroid to pull
-    // the target point toward it (e.g. rescue markers, junction markers).
+  // --- Green-weighted target point ---
+  // Distance (in resized-frame pixels) within which a detected green
+  // blob is considered close enough to the line's centroid to pull
+  // the target point toward it (e.g. rescue markers, junction markers).
   const double greenDistThreshold = 150.0;
-    // Relative weighting of a qualifying green centroid versus the
-    // line contour's own centroid when averaging the target point.
-    // >1.0 means green contours are weighted more heavily than the line COM.
+  // Relative weighting of a qualifying green centroid versus the
+  // line contour's own centroid when averaging the target point.
+  // >1.0 means green contours are weighted more heavily than the line COM.
   const double greenWeight = 25.0;
 
   std::vector<std::vector<cv::Point>> greenContours;
   std::vector<cv::Point> greenCenters = this->extractGreen(resized, &greenContours);
 
-    // --- Draw green contours in green ---
-    // cv::drawContours(processed, greenContours, -1, cv::Scalar(0, 255, 0), 2);
+  // --- Draw green contours in green ---
+  cv::drawContours(processed, greenContours, -1, cv::Scalar(0, 255, 0), 2);
 
   if (greenCenters.size() >= 2) {
     cv::Point p1 = greenCenters[0];
     cv::Point p2 = greenCenters[1];
 
-    double angle = this->calculateAngle(p1, p2);
-    if (std::abs(angle) < 0.5 || std::abs(angle) > std::numbers::pi - 0.5) {
-      RCLCPP_INFO(this->get_logger(), "Starting double green");
-      this->sendMovementGoal(0, 100, 3.3);
-      this->state = GREEN_ROTATE;
-      RCLCPP_INFO(this->get_logger(), "Sent double green start message");
-      return 0;
-    }
+    // double angle = this->calculateAngle(p1, p2);
+    // if (std::abs(angle) < 0.5 || std::abs(angle) > std::numbers::pi - 0.5) {
+    //   RCLCPP_INFO(this->get_logger(), "Starting double green");
+    //   this->sendMovementGoal(0, 100, 3.3);
+    //   this->state = GREEN_ROTATE;
+    //   RCLCPP_INFO(this->get_logger(), "Sent double green start message");
+    //   return 0;
+    // }
   }
 
   cv::Point2d greenSum = cv::Point2d();
@@ -456,12 +471,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     double dist = this->calculateDist(
       greenPoint, cv::Point(static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)));
 
-      // Mark each green blob centre: yellow if it contributed to the
-      //   weighted target point, red if it was too far away and ignored.
-      // cv::Scalar markerColor = (dist <= greenDistThreshold) ?
-      //   cv::Scalar(0, 255, 255) :
-      //   cv::Scalar(0, 0, 255);
-      // cv::circle(processed, greenPoint, 6, markerColor, -1);
+    // Mark each green blob centre: yellow if it contributed to the
+    //   weighted target point, red if it was too far away and ignored.
+    cv::Scalar markerColor =
+      (dist <= greenDistThreshold) ? cv::Scalar(0, 255, 255) : cv::Scalar(0, 0, 255);
+    cv::circle(processed, greenPoint, 6, markerColor, -1);
 
     if (dist > greenDistThreshold) {
       continue;
@@ -473,34 +487,34 @@ double NavigationNode::simpleError(const cv::Mat & frame)
 
   cv::Point2d targetPoint = lineCentroid + greenSum / totalWeight;
 
-    // --- COM annotations (resized-frame coordinates) ---
-    // Raw line centroid, before green-weighting: magenta.
-    // cv::circle(processed, cv::Point(
-    //     static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)),
-    //   8, cv::Scalar(255, 0, 255), -1);
+  // --- COM annotations (resized-frame coordinates) ---
+  // Raw line centroid, before green-weighting: magenta.
+  cv::circle(
+    processed, cv::Point(static_cast<int>(lineCentroid.x), static_cast<int>(lineCentroid.y)), 8,
+    cv::Scalar(255, 0, 255), -1);
 
-    // Final green-weighted target point: cyan circle + crosshair.
+  // Final green-weighted target point: cyan circle + crosshair.
   cv::Point targetPx(static_cast<int>(targetPoint.x), static_cast<int>(targetPoint.y));
-  // cv::circle(processed, targetPx, 10, cv::Scalar(255, 255, 0), 2);
-  // cv::drawMarker(processed, targetPx, cv::Scalar(255, 255, 0), cv::MARKER_CROSS, 20, 2);
+  cv::circle(processed, targetPx, 10, cv::Scalar(255, 255, 0), 2);
+  cv::drawMarker(processed, targetPx, cv::Scalar(255, 255, 0), cv::MARKER_CROSS, 20, 2);
 
-    // Undo the crop offset to bring the target point back into full-frame coordinates.
+  // Undo the crop offset to bring the target point back into full-frame coordinates.
   targetPoint.x += x;
   targetPoint.y += y;
 
-    // 6. Stationary reference point: bottom-middle of the (uncropped) frame.
+  // 6. Stationary reference point: bottom-middle of the (uncropped) frame.
   cv::Point2d stationaryPoint(frame.cols / 2.0, frame.rows);
 
   double dx = targetPoint.x - stationaryPoint.x;
   double dy = stationaryPoint.y - targetPoint.y;  // flip so "straight ahead" is positive dy
 
-    // Error is now the heading angle from the stationary point to the
-    // (green-weighted) target centroid, rather than a raw pixel offset.
+  // Error is now the heading angle from the stationary point to the
+  // (green-weighted) target centroid, rather than a raw pixel offset.
   double error = std::atan2(dx, dy);
   double length = std::sqrt(dx * dx + dy * dy);
   error *= length;
 
-  // this->writer.write(processed);
+  this->writer.write(processed);
 
   return error;
 }
@@ -556,8 +570,7 @@ cv::Mat NavigationNode::processImage(cv::Mat & image)
   cv::Mat binary = this->applyThreshold(resized, 55, 5);
 
   cv::Mat skeleton;
-  cv::ximgproc::thinning(binary, skeleton,
-                         cv::ximgproc::THINNING_GUOHALL);
+  cv::ximgproc::thinning(binary, skeleton, cv::ximgproc::THINNING_GUOHALL);
 
   int rows = skeleton.rows;
   int cols = skeleton.cols;
@@ -591,8 +604,7 @@ cv::Point NavigationNode::localToGlobalFrame(cv::Point point)
 }
 
 std::vector<cv::Point> NavigationNode::extractGreen(
-  cv::Mat & image,
-  std::vector<std::vector<cv::Point>> * outContours)
+  cv::Mat & image, std::vector<std::vector<cv::Point>> * outContours)
 {
   cv::Mat hsv;
   cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
@@ -608,12 +620,12 @@ std::vector<cv::Point> NavigationNode::extractGreen(
 
   std::vector<std::vector<cv::Point>> contours;
   std::vector<cv::Vec4i> hierarchy;
-  cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL,
-                   cv::CHAIN_APPROX_SIMPLE);
+  cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
   std::vector<cv::Point> centers;
 
-  std::sort(contours.begin(), contours.end(),
+  std::sort(
+    contours.begin(), contours.end(),
     [](const std::vector<cv::Point> & a, const std::vector<cv::Point> & b) {
       return cv::contourArea(a) > cv::contourArea(b);
     });
@@ -644,15 +656,88 @@ std::vector<cv::Point> NavigationNode::extractGreen(
   return centers;
 }
 
-cv::Point NavigationNode::cvtPoint(
-  cv::Mat & src, cv::Mat & dst,
-  cv::Point point)
+std::vector<cv::Point> Vision::extractSilver(
+  const cv::Mat & frame, std::vector<std::vector<cv::Point>> * silverContours)
+{
+  std::vector<cv::Point> silverCenters;
+
+  if (frame.empty()) return silverCenters;
+
+  // 1. Convert BGR -> HSV
+  cv::Mat hsv;
+  cv::cvtColor(frame, hsv, cv::COLOR_BGR2HSV);
+
+  // 2. Threshold for reflective silver (low saturation, high brightness) - to tune
+
+  cv::Mat silverMask;
+
+  cv::inRange(
+    hsv, cv::Scalar(0, 0, 170),  // H min, S min, V min
+    cv::Scalar(180, 80, 255),    // H max, S max, V max
+    silverMask);
+
+  // 3. Clean up the mask
+  cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(7, 3));
+
+  // Remove small isolated noise
+  cv::morphologyEx(silverMask, silverMask, cv::MORPH_OPEN, kernel);
+
+  // Fill small gaps in the silver line
+  cv::morphologyEx(silverMask, silverMask, cv::MORPH_CLOSE, kernel);
+
+  // 4. Find contours
+  std::vector<std::vector<cv::Point>> contours;
+
+  cv::findContours(silverMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+  // 5. Filter contours
+  for (const auto & contour : contours) {
+    // Minimum area
+    double area = cv::contourArea(contour);
+
+    if (area < 100) continue;
+
+    // Bounding rectangle
+    cv::Rect rect = cv::boundingRect(contour);
+
+    // Must extend almost completely across the image
+    if (rect.x > 2) continue;
+
+    if (rect.x + rect.width < frame.cols - 2) continue;
+
+    // Must be relatively thin vertically
+    if (rect.height > frame.rows * 0.15) continue;
+
+    // Must have a high width/height ratio
+    double aspectRatio = static_cast<double>(rect.width) / static_cast<double>(rect.height);
+
+    if (aspectRatio < 5.0) continue;
+
+    // Calculate contour centre
+    cv::Moments moments = cv::moments(contour);
+
+    if (moments.m00 == 0) continue;
+
+    int cx = static_cast<int>(moments.m10 / moments.m00);
+    int cy = static_cast<int>(moments.m01 / moments.m00);
+
+    // Save centre & contour
+    silverCenters.emplace_back(cx, cy);
+
+    if (silverContours != nullptr) {
+      silverContours->push_back(contour);
+    }
+  }
+
+  return silverCenters;
+}
+
+cv::Point NavigationNode::cvtPoint(cv::Mat & src, cv::Mat & dst, cv::Point point)
 {
   double sx = static_cast<double>(dst.cols) / static_cast<double>(src.cols);
   double sy = static_cast<double>(dst.rows) / static_cast<double>(src.rows);
 
-  return cv::Point(cv::saturate_cast<int>(point.x * sx),
-                   cv::saturate_cast<int>(point.y * sy));
+  return cv::Point(cv::saturate_cast<int>(point.x * sx), cv::saturate_cast<int>(point.y * sy));
 }
 
 Node * Graph::nodeFromID(int id)
@@ -686,8 +771,7 @@ void NavigationNode::extractNodes()
   cv::findNonZero(image, whitePixels);
 
   for (const auto & point : whitePixels) {
-    std::vector<cv::Point> surroundingPoints =
-      this->getSurroundingPoints(point, 3);
+    std::vector<cv::Point> surroundingPoints = this->getSurroundingPoints(point, 3);
 
     if (surroundingPoints.size() == 3) {
       continue;
@@ -703,9 +787,9 @@ void NavigationNode::extractNodes()
       node.is_endpoint = true;
     }
 
-    if (node.pos.x <= 1 || node.pos.y <= 1 || node.pos.x >= image.cols - 2 ||
-      node.pos.y >= image.rows - 2)
-    {
+    if (
+      node.pos.x <= 1 || node.pos.y <= 1 || node.pos.x >= image.cols - 2 ||
+      node.pos.y >= image.rows - 2) {
       node.screen_edge = true;
     } else {
       node.screen_edge = false;
@@ -717,17 +801,13 @@ void NavigationNode::extractNodes()
   this->graph.nodes = foundNodes;
 }
 
-std::vector<cv::Point> NavigationNode::getSurroundingPoints(
-  cv::Point centre,
-  int radius)
+std::vector<cv::Point> NavigationNode::getSurroundingPoints(cv::Point centre, int radius)
 {
   cv::Mat image = this->skeletonizedImage;
   cv::Rect roi(centre.x - 1, centre.y - 1, radius, radius);
   std::vector<cv::Point> surroundingPoints;
 
-  if (centre.x <= 0 || centre.y <= 0 || centre.x >= image.cols - 1 ||
-    centre.y >= image.rows - 1)
-  {
+  if (centre.x <= 0 || centre.y <= 0 || centre.x >= image.cols - 1 || centre.y >= image.rows - 1) {
     return surroundingPoints;
   }
 
@@ -808,8 +888,8 @@ void NavigationNode::removeShortEdges(std::vector<Edge> & edges)
       continue;
     }
 
-    Node *src = this->graph.nodeFromID(edges[i].src);
-    Node *dst = this->graph.nodeFromID(edges[i].dst);
+    Node * src = this->graph.nodeFromID(edges[i].src);
+    Node * dst = this->graph.nodeFromID(edges[i].dst);
 
     if (!src || !dst) {
       RCLCPP_ERROR(this->get_logger(), "Node does not exist!");
@@ -824,7 +904,7 @@ void NavigationNode::removeShortEdges(std::vector<Edge> & edges)
     }
 
     // Merge close intersections
-    for (Edge *connectedEdge : this->graph.getConnectedEdges(edges[i].src)) {
+    for (Edge * connectedEdge : this->graph.getConnectedEdges(edges[i].src)) {
       if (!connectedEdge) {
         RCLCPP_ERROR(this->get_logger(), "Edge does not exist!");
         continue;
@@ -841,23 +921,19 @@ void NavigationNode::removeShortEdges(std::vector<Edge> & edges)
 Edge NavigationNode::mergeEdges(Edge edge1, Edge edge2)
 {
   if (edge1.dst == edge2.src) {
-    edge1.path.insert(edge1.path.end(), edge2.path.begin() + 1,
-                      edge2.path.end());
+    edge1.path.insert(edge1.path.end(), edge2.path.begin() + 1, edge2.path.end());
     edge1.dst = edge2.dst;
   } else if (edge1.src == edge2.dst) {
-    edge1.path.insert(edge1.path.begin(), edge2.path.begin() + 1,
-                      edge2.path.end());
+    edge1.path.insert(edge1.path.begin(), edge2.path.begin() + 1, edge2.path.end());
     edge1.src = edge2.src;
   } else if (edge1.dst == edge2.dst) {
     std::reverse(edge2.path.begin(), edge2.path.end());
 
-    edge1.path.insert(edge1.path.end(), edge2.path.begin() + 1,
-                      edge2.path.end());
+    edge1.path.insert(edge1.path.end(), edge2.path.begin() + 1, edge2.path.end());
     edge1.dst = edge2.src;
   } else if (edge1.src == edge2.src) {
     std::reverse(edge2.path.begin(), edge2.path.end());
-    edge1.path.insert(edge1.path.begin(), edge2.path.begin() + 1,
-                      edge2.path.end());
+    edge1.path.insert(edge1.path.begin(), edge2.path.begin() + 1, edge2.path.end());
     edge1.src = edge2.dst;
   }
 
@@ -889,8 +965,7 @@ void NavigationNode::removeUnconnectedNodes()
 std::vector<Edge> NavigationNode::traceConnectedEdges(Node node)
 {
   std::vector<Edge> connectedEdges;
-  std::vector<cv::Point> surroundingPoints =
-    this->getSurroundingPoints(node.pos, 3);
+  std::vector<cv::Point> surroundingPoints = this->getSurroundingPoints(node.pos, 3);
 
   for (const auto & point : surroundingPoints) {
     if (point == node.pos) {
@@ -923,8 +998,7 @@ double NavigationNode::calculateAngle(cv::Point point1, cv::Point point2)
 
 double NavigationNode::calculateDist(cv::Point point1, cv::Point point2)
 {
-  return std::sqrt(std::pow(point1.x - point2.x, 2) +
-                   std::pow(point1.y - point2.y, 2));
+  return std::sqrt(std::pow(point1.x - point2.x, 2) + std::pow(point1.y - point2.y, 2));
 }
 
 Node NavigationNode::followToNode(std::vector<cv::Point> & path)
@@ -936,26 +1010,23 @@ Node NavigationNode::followToNode(std::vector<cv::Point> & path)
     previous = path[path.size() - 2];
   }
 
-  auto it =
-    std::find_if(this->graph.nodes.begin(), this->graph.nodes.end(),
-      [current](const Node & node) {return node.pos == current;});
+  auto it = std::find_if(
+    this->graph.nodes.begin(), this->graph.nodes.end(),
+    [current](const Node & node) { return node.pos == current; });
 
   if (it != this->graph.nodes.end()) {
     return *it;
   }
 
-  std::vector<cv::Point> surroundingPoints =
-    this->getSurroundingPoints(current, 3);
+  std::vector<cv::Point> surroundingPoints = this->getSurroundingPoints(current, 3);
 
-  auto it1 =
-    std::find(surroundingPoints.begin(), surroundingPoints.end(), current);
+  auto it1 = std::find(surroundingPoints.begin(), surroundingPoints.end(), current);
 
   if (it1 != surroundingPoints.end()) {
     surroundingPoints.erase(it1);
   }
 
-  auto it2 =
-    std::find(surroundingPoints.begin(), surroundingPoints.end(), previous);
+  auto it2 = std::find(surroundingPoints.begin(), surroundingPoints.end(), previous);
 
   if (it2 != surroundingPoints.end()) {
     surroundingPoints.erase(it2);
@@ -978,7 +1049,7 @@ void NavigationNode::findNextNode(std::vector<Node> & path)
   std::vector<Edge *> connected = this->graph.getConnectedEdges(current.id);
   std::vector<int> connectedNodes;
 
-  for (const Edge *edge : connected) {
+  for (const Edge * edge : connected) {
     if (edge->dst == current.id) {
       connectedNodes.push_back(edge->src);
     } else {
@@ -990,8 +1061,7 @@ void NavigationNode::findNextNode(std::vector<Node> & path)
     return;
   }
 
-  std::vector<double> connectedDirs =
-    this->getEdgeDirections(current, connected);
+  std::vector<double> connectedDirs = this->getEdgeDirections(current, connected);
 
   double previousAngle = 0;
 
@@ -1055,17 +1125,15 @@ void NavigationNode::updateGraph()
       int src = edge.src;
       int dst = edge.dst;
 
-      auto src_it =
-        std::find_if(this->graph.nodes.begin(), this->graph.nodes.end(),
-          [&src](const Node & node) {return node.id == src;});
+      auto src_it = std::find_if(
+        this->graph.nodes.begin(), this->graph.nodes.end(),
+        [&src](const Node & node) { return node.id == src; });
 
-      auto dst_it =
-        std::find_if(this->graph.nodes.begin(), this->graph.nodes.end(),
-          [&dst](const Node & node) {return node.id == dst;});
+      auto dst_it = std::find_if(
+        this->graph.nodes.begin(), this->graph.nodes.end(),
+        [&dst](const Node & node) { return node.id == dst; });
 
-      if (src_it != this->graph.nodes.end() &&
-        dst_it != this->graph.nodes.end())
-      {
+      if (src_it != this->graph.nodes.end() && dst_it != this->graph.nodes.end()) {
         continue;
       }
 
@@ -1082,8 +1150,7 @@ void NavigationNode::updateGraph()
   }
 
   // Match observed nodes to tracked nodes
-  std::vector<std::vector<double>> costMatrix =
-    this->trackedGraph.getCostMatrix(this->graph);
+  std::vector<std::vector<double>> costMatrix = this->trackedGraph.getCostMatrix(this->graph);
   std::vector<int> assignment;
 
   HungarianAlgorithm().Solve(costMatrix, assignment);
@@ -1094,21 +1161,19 @@ void NavigationNode::updateGraph()
   for (uint32_t i = 0; i < this->trackedGraph.nodes.size(); i++) {
     int assigned = assignment[i];
 
-    if (assigned > 0 && static_cast<uint32_t>(assigned) < matched.size() &&
-      costMatrix[i][assigned] <= this->gatingThreshold)
-    {
+    if (
+      assigned > 0 && static_cast<uint32_t>(assigned) < matched.size() &&
+      costMatrix[i][assigned] <= this->gatingThreshold) {
       cv::Mat measurement =
         (cv::Mat_<float>(2, 1) << this->graph.nodes[assigned].pos.x,
-        this->graph.nodes[assigned].pos.y);
+         this->graph.nodes[assigned].pos.y);
 
       // this->trackedGraph.nodes[i].kf.correct(measurement);
       this->trackedGraph.nodes[i].missedFrames = 0;
       this->trackedGraph.nodes[i].age++;
       this->trackedGraph.nodes[i].pos = this->graph.nodes[assigned].pos;
-      this->trackedGraph.nodes[i].is_endpoint =
-        this->graph.nodes[assigned].is_endpoint;
-      this->trackedGraph.nodes[i].screen_edge =
-        this->graph.nodes[assigned].screen_edge;
+      this->trackedGraph.nodes[i].is_endpoint = this->graph.nodes[assigned].is_endpoint;
+      this->trackedGraph.nodes[i].screen_edge = this->graph.nodes[assigned].screen_edge;
       matched[assigned] = true;
       newIDs[assigned] = this->trackedGraph.nodes[i].id;
     } else {
@@ -1135,10 +1200,10 @@ void NavigationNode::updateGraph()
 
   // Remove nodes that haven't been seen in 5 frames
   this->trackedGraph.nodes.erase(
-      std::remove_if(
-          this->trackedGraph.nodes.begin(), this->trackedGraph.nodes.end(),
-      [](const TrackedNode & node) {return node.missedFrames > 5;}),
-      this->trackedGraph.nodes.end());
+    std::remove_if(
+      this->trackedGraph.nodes.begin(), this->trackedGraph.nodes.end(),
+      [](const TrackedNode & node) { return node.missedFrames > 5; }),
+    this->trackedGraph.nodes.end());
 
   this->trackedGraph.edges.clear();
 
@@ -1152,20 +1217,17 @@ void NavigationNode::updateGraph()
 
       int connectedID = edge.src == node.id ? edge.dst : edge.src;
 
-      auto connectedIt =
-        std::find_if(this->graph.nodes.begin(), this->graph.nodes.end(),
-          [&connectedID](const Node & connected) {
-            return connected.id == connectedID;
-                       });
+      auto connectedIt = std::find_if(
+        this->graph.nodes.begin(), this->graph.nodes.end(),
+        [&connectedID](const Node & connected) { return connected.id == connectedID; });
 
       if (connectedIt == this->graph.nodes.end()) {
-        RCLCPP_ERROR(this->get_logger(),
-          "Couldn't find the other node??? (This should never happen)");
+        RCLCPP_ERROR(
+          this->get_logger(), "Couldn't find the other node??? (This should never happen)");
         return;
       }
 
-      int connectedIndex =
-        std::distance(this->graph.nodes.begin(), connectedIt);
+      int connectedIndex = std::distance(this->graph.nodes.begin(), connectedIt);
 
       int trackedSrcIndex = edge.src == node.id ? i : connectedIndex;
       int trackedDstIndex = edge.dst == node.id ? i : connectedIndex;
@@ -1181,11 +1243,9 @@ void NavigationNode::updateGraph()
 
       bool exists = false;
       for (const TrackedEdge & existingTracked : this->trackedGraph.edges) {
-        if ((tracked.src == existingTracked.src &&
-          tracked.dst == existingTracked.dst) ||
-          (tracked.src == existingTracked.dst &&
-          tracked.dst == existingTracked.src))
-        {
+        if (
+          (tracked.src == existingTracked.src && tracked.dst == existingTracked.dst) ||
+          (tracked.src == existingTracked.dst && tracked.dst == existingTracked.src)) {
           exists = true;
           break;
         }
@@ -1207,31 +1267,27 @@ void NavigationNode::updateGraph()
     int dst = edge.dst;
 
     auto src_it = std::find_if(
-        this->trackedGraph.nodes.begin(), this->trackedGraph.nodes.end(),
-      [&src](const TrackedNode & node) {return node.id == src;});
+      this->trackedGraph.nodes.begin(), this->trackedGraph.nodes.end(),
+      [&src](const TrackedNode & node) { return node.id == src; });
 
     auto dst_it = std::find_if(
-        this->trackedGraph.nodes.begin(), this->trackedGraph.nodes.end(),
-      [&dst](const TrackedNode & node) {return node.id == dst;});
+      this->trackedGraph.nodes.begin(), this->trackedGraph.nodes.end(),
+      [&dst](const TrackedNode & node) { return node.id == dst; });
 
-    if (src_it != this->trackedGraph.nodes.end() &&
-      dst_it != this->trackedGraph.nodes.end())
-    {
+    if (src_it != this->trackedGraph.nodes.end() && dst_it != this->trackedGraph.nodes.end()) {
       continue;
     }
 
     this->trackedGraph.edges.erase(this->trackedGraph.edges.begin() + i);
     i--;
   }
-
 }
 
-std::vector<double>
-NavigationNode::getEdgeDirections(Node origin, std::vector<Edge *> edges)
+std::vector<double> NavigationNode::getEdgeDirections(Node origin, std::vector<Edge *> edges)
 {
   std::vector<double> results;
 
-  for (const Edge *edge : edges) {
+  for (const Edge * edge : edges) {
     cv::Point p;
 
     if (edge->src == origin.id) {
@@ -1256,17 +1312,17 @@ void NavigationNode::edgeToTracked(const Edge & edge, TrackedEdge & tracked)
   tracked.length = edge.length;
   tracked.age = 0;
 
-  tracked.angleFromSrc = this->calculateAngle(
-      this->graph.nodeFromID(edge.src)->pos, edge.path[this->minEdgeSize - 1]) + this->angle;
+  tracked.angleFromSrc =
+    this->calculateAngle(this->graph.nodeFromID(edge.src)->pos, edge.path[this->minEdgeSize - 1]) +
+    this->angle;
   tracked.angleFromDst =
-    this->calculateAngle(this->graph.nodeFromID(edge.dst)->pos,
-                           edge.path[edge.path.size() - this->minEdgeSize]) + this->angle;
+    this->calculateAngle(
+      this->graph.nodeFromID(edge.dst)->pos, edge.path[edge.path.size() - this->minEdgeSize]) +
+    this->angle;
   tracked.path = edge.path;
 }
 
-void NavigationNode::findStartingEdge(
-  int & trackingID,
-  TrackedEdge **currentEdge)
+void NavigationNode::findStartingEdge(int & trackingID, TrackedEdge ** currentEdge)
 {
   trackingID = -1;
 
@@ -1282,12 +1338,10 @@ void NavigationNode::findStartingEdge(
     }
   }
 
+  TrackedNode * src = this->trackedGraph.nodeFromID((*currentEdge)->src);
+  TrackedNode * dst = this->trackedGraph.nodeFromID((*currentEdge)->dst);
 
-  TrackedNode *src = this->trackedGraph.nodeFromID((*currentEdge)->src);
-  TrackedNode *dst = this->trackedGraph.nodeFromID((*currentEdge)->dst);
-
-  trackingID =
-    src->pos.y > dst->pos.y ? (*currentEdge)->dst : (*currentEdge)->src;
+  trackingID = src->pos.y > dst->pos.y ? (*currentEdge)->dst : (*currentEdge)->src;
 }
 
 double NavigationNode::wrapAngle(double angle)
@@ -1309,9 +1363,7 @@ double NavigationNode::addAngles(double angle1, double angle2)
   return wrapped;
 }
 
-void NavigationNode::findNextTarget(
-  int & trackingID,
-  TrackedEdge **currentEdge)
+void NavigationNode::findNextTarget(int & trackingID, TrackedEdge ** currentEdge)
 {
   if (this->searchLineBreak) {
     if (this->trackedGraph.nodes.size() == 0) {
@@ -1334,8 +1386,7 @@ void NavigationNode::findNextTarget(
     }
 
     TrackedNode closestNode = nodesInRange[0];
-    double closestDist =
-      this->calculateDist(this->searchLastPoint, closestNode.pos);
+    double closestDist = this->calculateDist(this->searchLastPoint, closestNode.pos);
 
     for (TrackedNode & node : nodesInRange) {
       double dist = this->calculateDist(this->searchLastPoint, node.pos);
@@ -1356,10 +1407,9 @@ void NavigationNode::findNextTarget(
       }
     }
 
-    TrackedEdge *newEdge = this->closestToAngle(
-        closestNode.id, surroundingEdges, this->searchDirection);
-    int newTarget =
-      closestNode.id == newEdge->src ? newEdge->dst : newEdge->src;
+    TrackedEdge * newEdge =
+      this->closestToAngle(closestNode.id, surroundingEdges, this->searchDirection);
+    int newTarget = closestNode.id == newEdge->src ? newEdge->dst : newEdge->src;
 
     this->currentTarget = newTarget;
     this->currentEdge = newEdge;
@@ -1372,7 +1422,7 @@ void NavigationNode::findNextTarget(
     return;
   }
 
-  TrackedNode *currentNodePointer = this->trackedGraph.nodeFromID(trackingID);
+  TrackedNode * currentNodePointer = this->trackedGraph.nodeFromID(trackingID);
 
   if (!currentNodePointer) {
     this->currentTarget = -1;
@@ -1388,11 +1438,9 @@ void NavigationNode::findNextTarget(
     this->searchLineBreak = true;
     this->searchLastNode = currentNode.id;
     this->searchLastPoint = currentNode.pos;
-    double currentDir = trackingID == (*currentEdge)->src ?
-      (*currentEdge)->angleFromSrc :
-      (*currentEdge)->angleFromDst;
+    double currentDir = trackingID == (*currentEdge)->src ? (*currentEdge)->angleFromSrc
+                                                          : (*currentEdge)->angleFromDst;
     this->searchDirection = this->addAngles(currentDir, std::numbers::pi);
-
 
     return;
   }
@@ -1405,26 +1453,21 @@ void NavigationNode::findNextTarget(
     }
   }
 
-
   if (surroundingEdges.size() == 0) {
     RCLCPP_ERROR(this->get_logger(), "No surrounding edges to node (This should never happen)");
     return;
   }
 
-  double currentAngle = trackingID == (*currentEdge)->src ?
-    (*currentEdge)->angleFromSrc :
-    (*currentEdge)->angleFromDst;
+  double currentAngle =
+    trackingID == (*currentEdge)->src ? (*currentEdge)->angleFromSrc : (*currentEdge)->angleFromDst;
 
   if (surroundingEdges.size() < 3) {
-
     double targetAngle = this->addAngles(currentAngle, std::numbers::pi);
 
-    TrackedEdge *closestEdge =
-      this->closestToAngle(trackingID, surroundingEdges, targetAngle);
+    TrackedEdge * closestEdge = this->closestToAngle(trackingID, surroundingEdges, targetAngle);
 
     *this->currentEdge = *closestEdge;
-    this->currentTarget =
-      trackingID == closestEdge->src ? closestEdge->dst : closestEdge->src;
+    this->currentTarget = trackingID == closestEdge->src ? closestEdge->dst : closestEdge->src;
 
     return;
   }
@@ -1446,12 +1489,9 @@ void NavigationNode::findNextTarget(
   double targetRight = this->addAngles(currentAngle, std::numbers::pi / 2);
   double targetStraight = this->addAngles(currentAngle, std::numbers::pi);
 
-  TrackedEdge *leftEdge =
-    this->closestToAngle(trackingID, surroundingEdges, targetLeft);
-  TrackedEdge *rightEdge =
-    this->closestToAngle(trackingID, surroundingEdges, targetRight);
-  TrackedEdge *straightEdge =
-    this->closestToAngle(trackingID, surroundingEdges, targetStraight);
+  TrackedEdge * leftEdge = this->closestToAngle(trackingID, surroundingEdges, targetLeft);
+  TrackedEdge * rightEdge = this->closestToAngle(trackingID, surroundingEdges, targetRight);
+  TrackedEdge * straightEdge = this->closestToAngle(trackingID, surroundingEdges, targetStraight);
 
   bool greenLeft = false;
   bool greenRight = false;
@@ -1468,8 +1508,7 @@ void NavigationNode::findNextTarget(
   }
 
   if (greenRight && greenLeft) {
-    trackingID = trackingID == (*currentEdge)->src ? (*currentEdge)->dst :
-      (*currentEdge)->src;
+    trackingID = trackingID == (*currentEdge)->src ? (*currentEdge)->dst : (*currentEdge)->src;
     return;
   } else if (greenRight) {
     **currentEdge = *rightEdge;
@@ -1479,8 +1518,7 @@ void NavigationNode::findNextTarget(
     **currentEdge = *straightEdge;
   }
 
-  trackingID = trackingID == (*currentEdge)->src ? (*currentEdge)->dst :
-    (*currentEdge)->src;
+  trackingID = trackingID == (*currentEdge)->src ? (*currentEdge)->dst : (*currentEdge)->src;
 }
 
 double NavigationNode::searchDistance(cv::Point point)
@@ -1504,20 +1542,15 @@ double NavigationNode::searchDistance(cv::Point point)
   return std::abs(dx * sinTheta - dy * cosTheta);
 }
 
-TrackedEdge *
-NavigationNode::closestToAngle(
-  int currentNode,
-  std::vector<TrackedEdge *> currentEdges,
-  double targetAngle)
+TrackedEdge * NavigationNode::closestToAngle(
+  int currentNode, std::vector<TrackedEdge *> currentEdges, double targetAngle)
 {
-  TrackedEdge *closestEdge = currentEdges[0];
-  double closestAngle = currentNode == currentEdge->src ?
-    closestEdge->angleFromSrc :
-    closestEdge->angleFromDst;
+  TrackedEdge * closestEdge = currentEdges[0];
+  double closestAngle =
+    currentNode == currentEdge->src ? closestEdge->angleFromSrc : closestEdge->angleFromDst;
 
-  for (TrackedEdge *edge : currentEdges) {
-    double angle =
-      currentNode == edge->src ? edge->angleFromSrc : edge->angleFromDst;
+  for (TrackedEdge * edge : currentEdges) {
+    double angle = currentNode == edge->src ? edge->angleFromSrc : edge->angleFromDst;
 
     double closestDiff = std::abs(this->addAngles(targetAngle, -closestAngle));
     double diff = std::abs(this->addAngles(targetAngle, -angle));
