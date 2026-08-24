@@ -66,8 +66,6 @@ NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
   static const std::unordered_map<std::string, NavigationType> nav_type_map = {
     {"simple", NavigationType::SIMPLE}, {"advanced", NavigationType::ADVANCED}};
 
-  timer_ = this->create_wall_timer(100ms, std::bind(&NavigationNode::timerCallback, this));
-
   auto it = nav_type_map.find(nav_type_str);
 
   if (it != nav_type_map.end()) {
@@ -103,6 +101,9 @@ CallbackReturn NavigationNode::on_configure(const rclcpp_lifecycle::State &)
   this->odomSub = this->create_subscription<nav_msgs::msg::Odometry>(
     "/odom", 10, std::bind(&NavigationNode::odomCallback, this, _1));
 
+  timer_ = this->create_wall_timer(100ms, std::bind(&NavigationNode::timerCallback, this));
+  timer_->cancel();
+
   return CallbackReturn::SUCCESS;
 }
 
@@ -110,6 +111,10 @@ CallbackReturn NavigationNode::on_activate(const rclcpp_lifecycle::State & state
 {
   this->errorPub->on_activate();
   this->lineCompletePub->on_activate();
+
+  timer_->reset();
+
+  this->state = FOLLOWING;
 
   return rclcpp_lifecycle::LifecycleNode::on_activate(state);
 }
@@ -119,6 +124,8 @@ CallbackReturn NavigationNode::on_deactivate(const rclcpp_lifecycle::State & sta
   this->errorPub->on_deactivate();
   this->lineCompletePub->on_deactivate();
 
+  timer_->cancel();
+
   return rclcpp_lifecycle::LifecycleNode::on_deactivate(state);
 }
 
@@ -127,6 +134,8 @@ CallbackReturn NavigationNode::on_cleanup(const rclcpp_lifecycle::State &)
   this->errorPub.reset();
   this->imageSub.reset();
   this->odomSub.reset();
+
+  timer_->reset();
 
   return CallbackReturn::SUCCESS;
 }
