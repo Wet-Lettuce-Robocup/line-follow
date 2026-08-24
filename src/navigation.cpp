@@ -674,7 +674,7 @@ bool NavigationNode::detectRed(cv::Mat & image, cv::Mat & processed)
 
   cv::findContours(redMask, redContours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-  constexpr double minRedArea = 3000.0;
+  constexpr double minRedArea = 500.0;  // To be safe, could go lower?
 
   bool redDetected = false;
 
