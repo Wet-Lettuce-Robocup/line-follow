@@ -329,7 +329,7 @@ void NavigationNode::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 void NavigationNode::publishError(double error)
 {
   std_msgs::msg::Float64 msg = std_msgs::msg::Float64();
-  msg.data = error * 350;
+  msg.data = error * 500;
   this->errorPub->publish(msg);
 }
 
@@ -542,6 +542,8 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   double error = std::atan2(dx, dy);
 
   this->writer.write(processed);
+  cv::imshow("b", processed);
+  cv::waitKey(1);
 
   return error;
 }
@@ -638,7 +640,7 @@ void NavigationNode::simpleNavigation(cv::Mat & frame)
 {
   double error = this->simpleError(frame);
 
-  this->publishError(2 * error);
+  this->publishError(error);
 }
 
 void NavigationNode::advancedNavigation(cv::Mat & frame)
