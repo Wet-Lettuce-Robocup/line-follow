@@ -332,7 +332,7 @@ void NavigationNode::timerCallback()
         bool pressed = event.event_type == ::gpiod::line_event::RISING_EDGE ? true : false;
       }
 
-      if (this->pressed):
+      if (pressed):
         {
           RCLCPP_INFO(this->get_logger(), "Limit switch triggered!");
           state = TOWER_ROTATE_START;
