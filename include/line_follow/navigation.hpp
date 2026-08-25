@@ -210,6 +210,8 @@ private:
   double y = 0;
   double angle = 0;
 
+  const int LIMIT_SWITCH_PIN = 27;
+
   bool searchLineBreak = false;
   int searchLastNode;
   cv::Point searchLastPoint;

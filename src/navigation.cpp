@@ -63,6 +63,8 @@ NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
   this->pixelSize = this->get_parameter("pixel_size").as_double();
   this->frameCentre = cv::Point(100, 70);
 
+  pinMode(LIMIT_SWITCH_PIN, INPUT_PULLUP);
+
   std::string nav_type_str = this->get_parameter("navigation_type").as_string();
 
   static const std::unordered_map<std::string, NavigationType> nav_type_map = {
@@ -306,6 +308,11 @@ void NavigationNode::timerCallback()
     case FOLLOWING: {
       if (this->currentFrame.empty()) {
         return;
+      }
+
+      if (digitalRead(LIMIT_SWITCH_PIN) == LOW) {
+        RCLCPP_INFO(this->get_logger(), "Limit switch triggered!");
+        state = TOWER_ROTATE_START;
       }
 
       switch (this->navigationType) {
