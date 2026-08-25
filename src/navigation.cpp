@@ -389,6 +389,11 @@ double NavigationNode::simpleError(const cv::Mat & frame)
     msg.data = true;
     RCLCPP_INFO(this->get_logger(), "Silver (red contour) detected");
     lineCompletePub->publish(msg);
+
+    this->state = COMPLETE;
+    this->writer.write(processed);
+    this->sendMovementGoal(0, 0, 0.1);
+    return 0.0;
   }
 
   // 4. Find the largest contour (assuming this is our line)
@@ -504,8 +509,8 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   // Error is now the heading angle from the stationary point to the
   // (green-weighted) target centroid, rather than a raw pixel offset.
   double error = std::atan2(dx, dy);
-  double length = std::sqrt(dx * dx + dy * dy);
-  error *= length;
+  // double length = std::sqrt(dx * dx + dy * dy);
+  // error *= length;
 
   this->writer.write(processed);
   // cv::imshow("b", processed);
