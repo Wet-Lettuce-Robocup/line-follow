@@ -509,8 +509,8 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   // Error is now the heading angle from the stationary point to the
   // (green-weighted) target centroid, rather than a raw pixel offset.
   double error = std::atan2(dx, dy);
-  // double length = std::sqrt(dx * dx + dy * dy);
-  // error *= length;
+  double length = std::sqrt(dx * dx + dy * dy);
+  error *= (1 / length);
 
   this->writer.write(processed);
   // cv::imshow("b", processed);
