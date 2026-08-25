@@ -330,7 +330,7 @@ void NavigationNode::timerCallback()
       if (input_line.event_wait(std::chrono::milliseconds(500))) {
         ::gpiod::line_event event = input_line.event_read();
 
-        bool pressed = event.event_type == ::gpiod::line_event::RISING_EDGE ? true : false;
+        pressed = event.event_type == ::gpiod::line_event::RISING_EDGE;
       }
 
       if (pressed) {
