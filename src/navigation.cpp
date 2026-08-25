@@ -53,6 +53,7 @@ NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
   this->declare_parameter<int>("gating_threshold", 50);
   this->declare_parameter<int>("search_min_dist", 20);
   this->declare_parameter<double>("pixel_size", 0.01);
+  this->declare_parameter<std::string>("movement_action_name", "move_time");
 
   this->pathLimit = this->get_parameter("path_limit").as_int();
   this->minEdgeSize = this->get_parameter("min_edge_size").as_int();
@@ -101,6 +102,11 @@ CallbackReturn NavigationNode::on_configure(const rclcpp_lifecycle::State &)
   this->odomSub = this->create_subscription<nav_msgs::msg::Odometry>(
     "/odom", 10, std::bind(&NavigationNode::odomCallback, this, _1));
 
+  std::string actionName = this->get_parameter("movement_action_name").as_string();
+  this->actionClient = rclcpp_action::create_client<robot_msgs::action::MoveTime>(
+    this->get_node_base_interface(), this->get_node_graph_interface(),
+    this->get_node_logging_interface(), this->get_node_waitables_interface(), actionName);
+
   timer_ = this->create_wall_timer(100ms, std::bind(&NavigationNode::timerCallback, this));
   timer_->cancel();
 
@@ -134,6 +140,7 @@ CallbackReturn NavigationNode::on_cleanup(const rclcpp_lifecycle::State &)
   this->errorPub.reset();
   this->imageSub.reset();
   this->odomSub.reset();
+  this->actionClient.reset();
 
   timer_->reset();
 
@@ -168,6 +175,14 @@ TrackedNode::TrackedNode(cv::Point pos)
 
 void NavigationNode::sendMovementGoal(double vel, double angular_vel, double time)
 {
+  if (!this->actionClient) {
+    RCLCPP_ERROR(
+      this->get_logger(),
+      "sendMovementGoal() called before the action client was initialised (on_configure) - "
+      "dropping goal.");
+    return;
+  }
+
   if (!this->actionClient->wait_for_action_server(std::chrono::seconds(10))) {
     RCLCPP_ERROR(this->get_logger(), "Action server not available.");
     return;
