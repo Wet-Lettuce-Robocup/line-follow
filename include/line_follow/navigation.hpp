@@ -15,6 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <gpiod.hpp>
 #include <opencv2/opencv.hpp>
 #include <rclcpp/publisher.hpp>
 #include <rclcpp/subscription.hpp>
@@ -210,7 +211,10 @@ private:
   double y = 0;
   double angle = 0;
 
-  const int LIMIT_SWITCH_PIN = 27;
+  bool pull_up;
+  unsigned int gpio_pin;
+  ::gpiod::chip chip;
+  ::gpiod::line input_line;
 
   bool searchLineBreak = false;
   int searchLastNode;

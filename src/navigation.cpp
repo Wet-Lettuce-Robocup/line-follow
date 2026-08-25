@@ -18,6 +18,7 @@
 #include "line_follow/navigation.hpp"
 
 #include <cv_bridge/cv_bridge.hpp>
+#include <gpiod.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
@@ -63,7 +64,22 @@ NavigationNode::NavigationNode(const rclcpp::NodeOptions & options)
   this->pixelSize = this->get_parameter("pixel_size").as_double();
   this->frameCentre = cv::Point(100, 70);
 
-  pinMode(LIMIT_SWITCH_PIN, INPUT_PULLUP);
+  this->declare_parameter<std::string>("gpio_chip", "gpiochip4");
+  this->declare_parameter<int>("gpio_pin", 27);
+  this->declare_parameter<bool>("pull_up", false);
+
+  this->chip = ::gpiod::chip(this->get_parameter("gpio_chip").as_string());
+  this->gpio_pin = this->get_parameter("gpio_pin").as_int();
+
+  this->input_line = this->chip.get_line(this->gpio_pin);
+
+  if (this->pull_up) {
+    this->input_line.request(
+      {"NavigationNode", ::gpiod::line_request::EVENT_BOTH_EDGES,
+       ::gpiod::line_request::FLAG_BIAS_PULL_UP});
+  } else {
+    this->input_line.request({"NavigationNode", ::gpiod::line_request::EVENT_BOTH_EDGES, 0});
+  }
 
   std::string nav_type_str = this->get_parameter("navigation_type").as_string();
 
@@ -310,10 +326,17 @@ void NavigationNode::timerCallback()
         return;
       }
 
-      if (digitalRead(LIMIT_SWITCH_PIN) == LOW) {
-        RCLCPP_INFO(this->get_logger(), "Limit switch triggered!");
-        state = TOWER_ROTATE_START;
+      if (input_line.event_wait(std::chrono::milliseconds(500))) {
+        ::gpiod::line_event event = input_line.event_read();
+
+        bool pressed = event.event_type == ::gpiod::line_event::RISING_EDGE ? true : false;
       }
+
+      if (this->pressed):
+        {
+          RCLCPP_INFO(this->get_logger(), "Limit switch triggered!");
+          state = TOWER_ROTATE_START;
+        }
 
       switch (this->navigationType) {
         case NavigationType::SIMPLE:
