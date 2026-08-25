@@ -54,7 +54,7 @@ target_link_libraries(navigation_plugin PUBLIC
   cv_bridge::cv_bridge
   ${OpenCV_LIBRARIES}
   hungarian-algorithm-cpp
-  gpiodxx
+  gpiodcxx
   gpiod
 )
 
