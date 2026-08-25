@@ -326,17 +326,17 @@ void NavigationNode::timerCallback()
         return;
       }
 
-      bool pressed = false;
-      if (input_line.event_wait(std::chrono::milliseconds(500))) {
-        ::gpiod::line_event event = input_line.event_read();
+      // bool pressed = false;
+      // if (input_line.event_wait(std::chrono::milliseconds(500))) {
+      //   ::gpiod::line_event event = input_line.event_read();
 
-        pressed = event.event_type == ::gpiod::line_event::RISING_EDGE;
-      }
+      //   pressed = event.event_type == ::gpiod::line_event::RISING_EDGE;
+      // }
 
-      if (pressed) {
-        RCLCPP_INFO(this->get_logger(), "Limit switch triggered!");
-        state = TOWER_ROTATE_START;
-      }
+      // if (pressed) {
+      //   RCLCPP_INFO(this->get_logger(), "Limit switch triggered!");
+      //   state = TOWER_ROTATE_START;
+      // }
 
       switch (this->navigationType) {
         case NavigationType::SIMPLE:
