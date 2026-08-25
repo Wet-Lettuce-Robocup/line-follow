@@ -171,6 +171,8 @@ target_link_libraries(navigation PRIVATE
   cv_bridge::cv_bridge
   ${OpenCV_LIBRARIES}
   hungarian-algorithm-cpp
+  gpiodcxx
+  gpiod
 )
 
 add_executable(pid_loop src/pid_loop.cpp)
