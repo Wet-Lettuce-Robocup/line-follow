@@ -16,8 +16,11 @@
  */
 
 #include "line_follow/pid_loop.hpp"
+
 #include <rclcpp/rclcpp.hpp>
+
 #include <lifecycle_msgs/msg/state.hpp>
+
 #include <cstdint>
 
 using std::placeholders::_1;
@@ -28,7 +31,7 @@ PIDLoop::PIDLoop(const rclcpp::NodeOptions & options)
   this->declare_parameter<double>("kp", 0.1);
   this->declare_parameter<double>("ki", 0.0);
   this->declare_parameter<double>("kd", 0.0);
-  this->declare_parameter<int>("default_speed", 60);
+  this->declare_parameter<int>("default_speed", 70);
 
   this->kp = this->get_parameter("kp").as_double();
   this->ki = this->get_parameter("ki").as_double();
@@ -39,8 +42,8 @@ PIDLoop::PIDLoop(const rclcpp::NodeOptions & options)
 CallbackReturn PIDLoop::on_configure(const rclcpp_lifecycle::State &)
 {
   this->twistPub = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
-  this->errorSub = this->create_subscription<std_msgs::msg::Float64>("line_error", 10,
-    std::bind(&PIDLoop::errorCallback, this, _1));
+  this->errorSub = this->create_subscription<std_msgs::msg::Float64>(
+    "line_error", 10, std::bind(&PIDLoop::errorCallback, this, _1));
 
   return CallbackReturn::SUCCESS;
 }
@@ -155,7 +158,9 @@ void PIDLoop::sendManualI2C(int32_t error)
   }
 
   uint32_t speed = this->defaultSpeed - 0.15 * std::abs(error);
-  if (std::abs(error) > 70) {speed = 0;}
+  if (std::abs(error) > 70) {
+    speed = 0;
+  }
 
   uint8_t buffer[13];
 

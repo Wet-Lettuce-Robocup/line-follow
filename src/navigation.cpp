@@ -344,7 +344,7 @@ void NavigationNode::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 void NavigationNode::publishError(double error)
 {
   std_msgs::msg::Float64 msg = std_msgs::msg::Float64();
-  msg.data = error * 350;
+  msg.data = error * 250;
   this->errorPub->publish(msg);
 }
 
