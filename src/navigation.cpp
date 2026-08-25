@@ -326,17 +326,17 @@ void NavigationNode::timerCallback()
         return;
       }
 
+      bool pressed = false;
       if (input_line.event_wait(std::chrono::milliseconds(500))) {
         ::gpiod::line_event event = input_line.event_read();
 
         bool pressed = event.event_type == ::gpiod::line_event::RISING_EDGE ? true : false;
       }
 
-      if (pressed):
-        {
-          RCLCPP_INFO(this->get_logger(), "Limit switch triggered!");
-          state = TOWER_ROTATE_START;
-        }
+      if (pressed) {
+        RCLCPP_INFO(this->get_logger(), "Limit switch triggered!");
+        state = TOWER_ROTATE_START;
+      }
 
       switch (this->navigationType) {
         case NavigationType::SIMPLE:
@@ -374,7 +374,7 @@ void NavigationNode::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 void NavigationNode::publishError(double error)
 {
   std_msgs::msg::Float64 msg = std_msgs::msg::Float64();
-  msg.data = error * 200;
+  msg.data = error * 250;
   this->errorPub->publish(msg);
 }
 
@@ -540,7 +540,7 @@ double NavigationNode::simpleError(const cv::Mat & frame)
   // (green-weighted) target centroid, rather than a raw pixel offset.
   double error = std::atan2(dx, dy);
   double length = std::sqrt(dx * dx + dy * dy);
-  error *= (1 / length);
+  error *= length;
 
   this->writer.write(processed);
   // cv::imshow("b", processed);
