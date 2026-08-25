@@ -107,7 +107,7 @@ CallbackReturn NavigationNode::on_configure(const rclcpp_lifecycle::State &)
     this->get_node_base_interface(), this->get_node_graph_interface(),
     this->get_node_logging_interface(), this->get_node_waitables_interface(), actionName);
 
-  timer_ = this->create_wall_timer(100ms, std::bind(&NavigationNode::timerCallback, this));
+  timer_ = this->create_wall_timer(33ms, std::bind(&NavigationNode::timerCallback, this));
   timer_->cancel();
 
   return CallbackReturn::SUCCESS;
@@ -344,7 +344,7 @@ void NavigationNode::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 void NavigationNode::publishError(double error)
 {
   std_msgs::msg::Float64 msg = std_msgs::msg::Float64();
-  msg.data = error * 500;
+  msg.data = error * 600;
   this->errorPub->publish(msg);
 }
 
