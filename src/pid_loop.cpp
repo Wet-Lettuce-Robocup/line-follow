@@ -31,7 +31,7 @@ PIDLoop::PIDLoop(const rclcpp::NodeOptions & options)
   this->declare_parameter<double>("kp", 0.1);
   this->declare_parameter<double>("ki", 0.0);
   this->declare_parameter<double>("kd", 0.0);
-  this->declare_parameter<int>("default_speed", 70);
+  this->declare_parameter<int>("default_speed", 75);
 
   this->kp = this->get_parameter("kp").as_double();
   this->ki = this->get_parameter("ki").as_double();
